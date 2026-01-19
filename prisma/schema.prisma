@@ -1,0 +1,74 @@
+// Prisma Schema for L&T IPMS Conversational App
+// This schema defines models for storing conversation history
+
+generator client {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Conversation model - represents a chat thread
+model Conversation {
+  id        String    @id @default(uuid())
+  threadId  String    @unique @map("thread_id")
+  title     String?
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  messages  Message[]
+
+  @@map("conversations")
+}
+
+// Message model - individual messages in a conversation
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String       @map("conversation_id")
+  role           String       // 'user', 'assistant', 'system'
+  content        String
+  createdAt      DateTime     @default(now()) @map("created_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+// SRA Dataset - Project performance metrics
+model SraTable {
+  id                          Int      @id @default(autoincrement())
+  projectId                   String   @map("project_id")
+  date                        DateTime
+  projectName                 String   @map("project_name")
+  plannedFinishDate           DateTime @map("planned_finish_date")
+  forecastFinishDate          DateTime @map("forecast_finish_date")
+  plannedValueAmount          Float    @map("planned_value_amount")
+  earnedValueAmount           Float    @map("earned_value_amount")
+  actualCostAmount            Float    @map("actual_cost_amount")
+  spiValue                    Float    @map("spi_value")
+  cpiValue                    Float    @map("cpi_value")
+  billingReadinessPct         Float    @map("billing_readiness_pct")
+  peiValue                    Float    @map("pei_value")
+  totalScopeQty               Float    @map("total_scope_qty")
+  rowAvailableQty             Float    @map("row_available_qty")
+  executedQty                 Float    @map("executed_qty")
+  executableProgressPct       Float    @map("executable_progress_pct")
+  remainingScopeQty           Float    @map("remaining_scope_qty")
+  requiredRateQty             Float    @map("required_rate_qty")
+  maxAchievedRateQty          Float    @map("max_achieved_rate_qty")
+  requiredRateFeasibilityPct  Float    @map("required_rate_feasibility_pct")
+  criticalDelayDays           Int      @map("critical_delay_days")
+  topDelayOwnerCategory       String?  @map("top_delay_owner_category")
+  lookaheadPlannedCountWeek   Int      @map("lookahead_planned_count_week")
+  lookaheadCompletedCountWeek Int      @map("lookahead_completed_count_week")
+  lookaheadCompliancePct      Float    @map("lookahead_compliance_pct")
+  criticalDensityPct          Float    @map("critical_density_pct")
+  createdAt                   DateTime @default(now()) @map("created_at")
+
+  @@index([projectId])
+  @@index([date])
+  @@map("sratable")
+}

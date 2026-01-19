@@ -1,0 +1,79 @@
+﻿
+> frontend@0.1.0 build
+> next build
+
+node.exe : 'T_IPMS\fr
+ontend\node_modules\.
+bin\' is not 
+recognized as an 
+internal or external 
+command,
+At line:1 char:1
++ & "C:\Program Files
+\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: ('T_IPMS   
+ \fronten...terna    
+l command,:Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+operable program or 
+batch file.
+node:internal/modules
+/cjs/loader:1423
+  throw err;
+  ^
+
+Error: Cannot find 
+module 'D:\SPR-AIProj
+ects\next\dist\bin\ne
+xt'
+    at Module._resolv
+eFilename (node:inter
+nal/modules/cjs/loade
+r:1420:15)
+    at 
+defaultResolveImpl (n
+ode:internal/modules/
+cjs/loader:1058:19)
+    at resolveForCJSW
+ithHooks (node:intern
+al/modules/cjs/loader
+:1063:22)
+    at Module._load (
+node:internal/modules
+/cjs/loader:1226:37)
+    at TracingChannel
+.traceSync (node:diag
+nostics_channel:328:1
+4)
+    at 
+wrapModuleLoad (node:
+internal/modules/cjs/
+loader:244:24)
+    at Module.execute
+UserEntryPoint [as 
+runMain] (node:intern
+al/modules/run_main:1
+54:5)
+    at node:internal/
+main/run_main_module:
+33:47 {
+  code: 
+'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.11.0
