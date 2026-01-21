@@ -7,14 +7,17 @@ import uuid
 import json
 import base64
 import asyncio
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 import httpx
 import redis.asyncio as redis_async
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Response, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, EmailStr
 
 from config import settings
 from db import get_prisma, close_prisma
@@ -22,6 +25,8 @@ from cache import get_redis_cache
 from agent import create_agent, create_checkpointer
 from agent.graph import run_conversation, get_conversation_history
 from agent.streaming import stream_conversation, subscribe_to_channel
+from auth.utils import hash_password, verify_password, create_session_token
+from auth.dependencies import get_current_user, get_optional_user, get_session_token
 from schemas import (
     ChatRequest,
     ChatResponse,
@@ -103,6 +108,176 @@ app.add_middleware(
 # The old static file routes have been removed
 
 
+# ============================================================================
+# Auth Pydantic Models
+# ============================================================================
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+class UserResponse(BaseModel):
+    id: str
+    name: str
+    email: str
+    systemRole: str
+    isActive: bool
+
+
+class SessionResponse(BaseModel):
+    user: UserResponse
+    token: str
+
+
+# ============================================================================
+# Auth Endpoints
+# ============================================================================
+
+@app.post("/auth/login", tags=["Auth"])
+async def login(request: LoginRequest, response: Response):
+    """
+    Authenticate user and create a session.
+    Returns session token and sets cookie.
+    """
+    prisma = await get_prisma()
+    
+    # Find user by email
+    user = await prisma.user.find_unique(
+        where={"email": request.email.lower()}
+    )
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # Verify password
+    if not verify_password(request.password, user.passwordHash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # Check if user is active
+    if not user.isActive:
+        raise HTTPException(status_code=403, detail="Account is inactive")
+    
+    # Create session
+    token = create_session_token()
+    expires_at = datetime.utcnow() + timedelta(days=7)
+    
+    await prisma.session.create(
+        data={
+            "userId": user.id,
+            "token": token,
+            "expiresAt": expires_at,
+        }
+    )
+    
+    # Set cookie
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        max_age=7 * 24 * 60 * 60,  # 7 days
+    )
+    
+    return {
+        "status": "success",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "systemRole": user.systemRole,
+            "isActive": user.isActive,
+        },
+        "token": token,
+    }
+
+
+@app.post("/auth/logout", tags=["Auth"])
+async def logout(
+    response: Response,
+    token: Optional[str] = Depends(get_session_token)
+):
+    """
+    Invalidate the current session.
+    """
+    if token:
+        prisma = await get_prisma()
+        try:
+            await prisma.session.delete_many(
+                where={"token": token}
+            )
+        except Exception:
+            pass  # Session might not exist
+    
+    # Clear cookie
+    response.delete_cookie(key="session_token")
+    
+    return {"status": "success", "message": "Logged out"}
+
+
+@app.get("/auth/session", tags=["Auth"])
+async def get_session(user = Depends(get_optional_user)):
+    """
+    Get the current user session.
+    Returns null if not authenticated.
+    """
+    if not user:
+        return {"user": None}
+    
+    return {
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "systemRole": user.systemRole,
+            "isActive": user.isActive,
+        }
+    }
+
+
+@app.post("/auth/change-password", tags=["Auth"])
+async def change_password(
+    request: ChangePasswordRequest,
+    user = Depends(get_current_user)
+):
+    """
+    Change the current user's password.
+    Requires old password for verification.
+    """
+    prisma = await get_prisma()
+    
+    # Verify old password
+    if not verify_password(request.old_password, user.passwordHash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    
+    # Validate new password
+    if len(request.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    
+    if len(request.new_password) > 50:
+        raise HTTPException(status_code=400, detail="New password is too long")
+    
+    # Hash and save new password
+    new_hash = hash_password(request.new_password)
+    
+    await prisma.user.update(
+        where={"id": user.id},
+        data={"passwordHash": new_hash}
+    )
+    
+    return {"status": "success", "message": "Password changed successfully"}
+
+
+# ============================================================================
+# API Endpoints
+# ============================================================================
+
 @app.get("/api/projects", tags=["Projects"])
 async def get_projects():
     """
@@ -112,16 +287,16 @@ async def get_projects():
     
     try:
         # Get distinct projects using Prisma ORM
-        all_projects = await prisma.sratable.find_many(
+        all_projects = await prisma.sraactivitytable.find_many(
             distinct=["projectId", "projectName"],
             order={"projectName": "asc"}
         )
         
         # Get date range
-        date_stats = await prisma.sratable.find_first(
+        date_stats = await prisma.sraactivitytable.find_first(
             order={"date": "asc"}
         )
-        date_stats_max = await prisma.sratable.find_first(
+        date_stats_max = await prisma.sraactivitytable.find_first(
             order={"date": "desc"}
         )
         
@@ -253,14 +428,14 @@ async def chat(request: ChatRequest):
         prisma = await get_prisma()
         try:
             # Get project info and date range
-            project_data = await prisma.sratable.find_first(
+            project_data = await prisma.sraactivitytable.find_first(
                 where={"projectId": request.project_id}
             )
-            date_stats = await prisma.sratable.find_first(
+            date_stats = await prisma.sraactivitytable.find_first(
                 where={"projectId": request.project_id},
                 order={"date": "asc"}
             )
-            date_stats_max = await prisma.sratable.find_first(
+            date_stats_max = await prisma.sraactivitytable.find_first(
                 where={"projectId": request.project_id},
                 order={"date": "desc"}
             )
@@ -328,14 +503,14 @@ async def chat_stream(request: ChatRequest):
     if request.project_id:
         prisma = await get_prisma()
         try:
-            project_data = await prisma.sratable.find_first(
+            project_data = await prisma.sraactivitytable.find_first(
                 where={"projectId": request.project_id}
             )
-            date_stats = await prisma.sratable.find_first(
+            date_stats = await prisma.sraactivitytable.find_first(
                 where={"projectId": request.project_id},
                 order={"date": "asc"}
             )
-            date_stats_max = await prisma.sratable.find_first(
+            date_stats_max = await prisma.sraactivitytable.find_first(
                 where={"projectId": request.project_id},
                 order={"date": "desc"}
             )
@@ -649,9 +824,9 @@ async def websocket_chat(websocket: WebSocket):
             if project_id:
                 try:
                     prisma = await get_prisma()
-                    project_data = await prisma.sratable.find_first(where={"projectId": project_id})
-                    date_stats = await prisma.sratable.find_first(where={"projectId": project_id}, order={"date": "asc"})
-                    date_stats_max = await prisma.sratable.find_first(where={"projectId": project_id}, order={"date": "desc"})
+                    project_data = await prisma.sraactivitytable.find_first(where={"projectId": project_id})
+                    date_stats = await prisma.sraactivitytable.find_first(where={"projectId": project_id}, order={"date": "asc"})
+                    date_stats_max = await prisma.sraactivitytable.find_first(where={"projectId": project_id}, order={"date": "desc"})
                     
                     if project_data:
                         date_from = date_stats.date.strftime("%Y-%m-%d") if date_stats else "N/A"

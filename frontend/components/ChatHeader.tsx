@@ -2,6 +2,8 @@
 
 import { useProjects } from '@/actions/useProjects';
 
+import Logout from '@/components/user/Logout';
+
 interface ChatHeaderProps {
     title: string;
     selectedProjectId: string;
@@ -47,6 +49,7 @@ export function ChatHeader({
                             ? `${projectsData.dateRange.from} - ${projectsData.dateRange.to}`
                             : 'No data'}
                 </div>
+                <Logout className="w-auto px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5" />
             </div>
         </header>
     );

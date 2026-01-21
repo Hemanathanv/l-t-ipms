@@ -72,3 +72,69 @@ model SraTable {
   @@index([date])
   @@map("sratable")
 }
+
+// User model - stores user credentials and profile
+model User {
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  systemRole    String    @default("USER") @map("system_role")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  sessions      Session[]
+  
+  @@map("users")
+}
+
+// Session model - stores active user sessions
+model Session {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+// SRA Activity-Level Dataset - Activity performance metrics with PEI
+model SraActivityTable {
+  id                       Int      @id @default(autoincrement())
+  date                     DateTime
+  projectId                String   @map("project_id")
+  projectName              String   @map("project_name")
+  activityId               String   @map("activity_id")
+  activityName             String   @map("activity_name")
+  isCriticalFlag           Int      @map("is_critical_flag")
+  plannedFinishDate        DateTime @map("planned_finish_date")
+  forecastFinishDate       DateTime @map("forecast_finish_date")
+  plannedStartDate         DateTime @map("planned_start_date")
+  plannedFinishActivityDate DateTime @map("planned_finish_activity_date")
+  plannedValueAmount       Float    @map("planned_value_amount")
+  earnedValueAmount        Float    @map("earned_value_amount")
+  totalScopeQty            Float    @map("total_scope_qty")
+  rowAvailableQty          Float    @map("row_available_qty")
+  executedQty              Float    @map("executed_qty")
+  totalFloatDays           Float    @map("total_float_days")
+  cpiValue                 Float    @map("cpi_value")
+  billingReadinessPct      Float    @map("billing_readiness_pct")
+  riskProfile              Float    @map("risk_profile")
+  spiValue                 Float    @map("spi_value")
+  peiValue                 Float    @map("pei_value")
+  forecastDelayDays        Int      @map("forecast_delay_days")
+  workfrontReadinessPct    Float    @map("workfront_readiness_pct")
+  avgFloat                 Float    @map("avg_float")
+  createdAt                DateTime @default(now()) @map("created_at")
+
+  @@index([projectId])
+  @@index([activityId])
+  @@index([date])
+  @@map("sra_activity_table")
+}

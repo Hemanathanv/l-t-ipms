@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatHeader } from '@/components/ChatHeader';
 import { MessageList } from '@/components/MessageList';
@@ -15,7 +15,6 @@ interface ChatContainerProps {
 
 export function ChatContainer({ initialThreadId }: ChatContainerProps) {
     const router = useRouter();
-    const pathname = usePathname();
     const [selectedProjectId, setSelectedProjectId] = useState('');
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -40,12 +39,22 @@ export function ChatContainer({ initialThreadId }: ChatContainerProps) {
         }
     }, [initialThreadId, conversationData, loadConversation]);
 
-    // Update URL when threadId changes
+    // Update URL when threadId changes - use history API to avoid remount
     useEffect(() => {
-        if (threadId && pathname !== `/chat/${threadId}`) {
-            router.push(`/chat/${threadId}`, { scroll: false });
+        if (threadId && !initialThreadId) {
+            const expectedPath = `/chat/${threadId}`;
+            // Only update if not already on the correct path
+            if (window.location.pathname !== expectedPath) {
+                // Use history.replaceState to update URL without remounting component
+                // This preserves the chat state during the first message
+                window.history.replaceState(
+                    { ...window.history.state, as: expectedPath, url: expectedPath },
+                    '',
+                    expectedPath
+                );
+            }
         }
-    }, [threadId, pathname, router]);
+    }, [threadId, initialThreadId]);
 
     const handleSelectConversation = (selectedThreadId: string) => {
         router.push(`/chat/${selectedThreadId}`);

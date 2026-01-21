@@ -145,19 +145,117 @@ async def clear_table():
     await prisma.disconnect()
 
 
+async def ingest_activity_csv(csv_path: str, batch_size: int = 100):
+    """
+    Ingest activity-level CSV data into PostgreSQL sra_activity_table.
+    
+    Args:
+        csv_path: Path to the CSV file
+        batch_size: Number of records to insert per batch
+    """
+    prisma = Prisma()
+    await prisma.connect()
+    
+    print(f"📂 Reading Activity CSV from: {csv_path}")
+    
+    csv_file = Path(csv_path)
+    if not csv_file.exists():
+        print(f"❌ File not found: {csv_path}")
+        await prisma.disconnect()
+        return
+    
+    records = []
+    total_inserted = 0
+    
+    with open(csv_file, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        
+        for row in reader:
+            record = {
+                "date": parse_date(row.get("date", "")),
+                "projectId": row.get("project_id", ""),
+                "projectName": row.get("project_name", ""),
+                "activityId": row.get("activity_id", ""),
+                "activityName": row.get("activity_name", ""),
+                "isCriticalFlag": parse_int(row.get("is_critical_flag", "0")),
+                "plannedFinishDate": parse_date(row.get("planned_finish_date", "")),
+                "forecastFinishDate": parse_date(row.get("forecast_finish_date", "")),
+                "plannedStartDate": parse_date(row.get("planned_start_date", "")),
+                "plannedFinishActivityDate": parse_date(row.get("planned_finish_activity_date", "")),
+                "plannedValueAmount": parse_float(row.get("planned_value_amount", "0")),
+                "earnedValueAmount": parse_float(row.get("earned_value_amount", "0")),
+                "totalScopeQty": parse_float(row.get("total_scope_qty", "0")),
+                "rowAvailableQty": parse_float(row.get("row_available_qty", "0")),
+                "executedQty": parse_float(row.get("executed_qty", "0")),
+                "totalFloatDays": parse_float(row.get("total_float_days", "0")),
+                "cpiValue": parse_float(row.get("cpi_value", "0")),
+                "billingReadinessPct": parse_float(row.get("billing_readiness_pct", "0")),
+                "riskProfile": parse_float(row.get("risk_profile", "0")),
+                "spiValue": parse_float(row.get("spi_value", "0")),
+                "peiValue": parse_float(row.get("pei_value", "0")),
+                "forecastDelayDays": parse_int(row.get("forecast_delay_days", "0")),
+                "workfrontReadinessPct": parse_float(row.get("workfront_readiness_pct", "0")),
+                "avgFloat": parse_float(row.get("avg_float", "0")),
+            }
+            records.append(record)
+            
+            # Insert in batches
+            if len(records) >= batch_size:
+                await prisma.sraactivitytable.create_many(data=records)
+                total_inserted += len(records)
+                print(f"✅ Inserted {total_inserted} activity records...")
+                records = []
+    
+    # Insert remaining records
+    if records:
+        await prisma.sraactivitytable.create_many(data=records)
+        total_inserted += len(records)
+    
+    print(f"🎉 Activity ingestion complete! Total records inserted: {total_inserted}")
+    
+    # Verify count
+    count = await prisma.sraactivitytable.count()
+    print(f"📊 Total records in sra_activity_table: {count}")
+    
+    await prisma.disconnect()
+
+
+async def clear_activity_table():
+    """Clear all records from sra_activity_table"""
+    prisma = Prisma()
+    await prisma.connect()
+    
+    deleted = await prisma.sraactivitytable.delete_many()
+    print(f"🗑️ Deleted {deleted} records from sra_activity_table")
+    
+    await prisma.disconnect()
+
+
 if __name__ == "__main__":
     import sys
     
-    # Default CSV path
-    csv_path = "samples/sra_single_dataset.csv"
+    # Default CSV paths
+    # csv_path = "samples/sra_single_dataset.csv"
+    activity_csv_path = "samples/sra_status_pei_activity_level_10projects_365days.csv"
     
     # Check for command line arguments
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--clear":
-            print("🗑️ Clearing sratable...")
-            asyncio.run(clear_table())
-        else:
-            csv_path = sys.argv[1]
-            asyncio.run(ingest_csv(csv_path))
-    else:
-        asyncio.run(ingest_csv(csv_path))
+    # if len(sys.argv) > 1:
+    # if sys.argv[1] == "--clear":
+    #     print("🗑️ Clearing sratable...")
+    #     asyncio.run(clear_table())
+    # elif sys.argv[1] == "--clear-activity":
+    #     print("🗑️ Clearing sra_activity_table...")
+    #     asyncio.run(clear_activity_table())
+    # if sys.argv[0] == "--activity":
+        # Ingest activity-level data
+        # if len(sys.argv) > 2:
+    # activity_csv_path = sys.argv[1]
+    asyncio.run(ingest_activity_csv(activity_csv_path))
+    # else:
+    #     pass
+            # csv_path = sys.argv[1]
+            # asyncio.run(ingest_csv(csv_path))
+    # else:
+    #     pass
+        # asyncio.run(ingest_csv(csv_path))
+

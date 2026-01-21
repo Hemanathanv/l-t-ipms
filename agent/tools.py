@@ -14,9 +14,12 @@ from db import get_prisma
 
 class SRAStatusInput(BaseModel):
     """Input schema for SRA status tool"""
-    project_id: Optional[str] = Field(None, description="Project ID to filter by (e.g., 'PRJ_001'). If not provided, returns all projects.")
-    start_date: Optional[str] = Field(None, description="Start date in YYYY-MM-DD format (e.g., '2025-07-01')")
-    end_date: Optional[str] = Field(None, description="End date in YYYY-MM-DD format (e.g., '2025-12-31'). If only start_date is provided, this defaults to start_date.")
+    project_id: Optional[str] = Field(None, description="Project ID to filter by (e.g., 'PRJ001'). Required for status check.")
+    date: Optional[str] = Field(None, description="Date in YYYY-MM-DD format (e.g., '2025-01-15'). If not provided, uses latest available data.")
+    response_style: Optional[str] = Field(
+        "standard", 
+        description="Response verbosity: 'executive' (1-2 lines), 'standard' (verdict + key metrics), 'detailed' (full analysis), 'metrics' (KPI-focused)"
+    )
 
 
 class SRADrillDelayInput(BaseModel):
@@ -42,42 +45,59 @@ def parse_date(date_str: str) -> Optional[date]:
 @tool(args_schema=SRAStatusInput)
 async def sra_status_pei(
     project_id: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    date: Optional[str] = None,
+    response_style: Optional[str] = "standard"
 ) -> str:
     """
-    Get PEI (Project Efficiency Index) status for a project within a date range.
+    Get project schedule health status using gated decision logic.
     
-    Use this tool when the user asks about:
-    - Current PEI value
-    - Project health/status
-    - Schedule performance
-    - "How's the project doing?"
-    - "Show current PEI"
+    USE THIS TOOL FOR:
+    ✅ Direct Status Checks: "Is the project on track?", "Are we okay on schedule?", "How is the project doing?"
+    ✅ Metric-Led Questions: "Show current PEI and SPI", "What's the SPI this week?", "Give me schedule KPIs"
+    ✅ Time-Bound Checks: "How are we doing this week?", "Where do we stand right now?"
+    ✅ Management Questions: "Give me a quick schedule health check", "Should I be worried about timelines?"
+    ✅ Validation Questions: "Is this SPI reliable?", "Can we trust the current plan?"
+    ✅ Executive One-Liners: "Schedule status?", "On track?", "Okay or not?"
     
-    IMPORTANT: This tool requires both project_id AND a date/date range.
-    If not provided, ask the user to specify them.
+    DO NOT USE FOR (redirect to other tools):
+    ❌ Root cause analysis → use sra_drill_delay
+    ❌ Recovery options → use sra_recovery_advise  
+    ❌ What-if scenarios → use sra_simulate
     
-    Returns PEI values with status indicators:
-    - 🟢 Green: PEI < 1 (good performance)
-    - 🟠 Orange: PEI >= 1 (needs attention)
+    HEALTH CLASSIFICATION (Gated Logic):
+    Gate 1: Workfront Readiness < 70% → NOT OK (Execution constrained)
+    Gate 2: SPI < 0.95 → NOT OK (Schedule unreliable)
+    Gate 3: Forecast Delay > 30 days → NOT OK (Material slippage)
+    Gate 4: Float < 5 days → OK BUT FRAGILE
+    Otherwise → OK
     
-    If PEI >= 1, suggests using sra_drill_delay for more details.
+    RESPONSE STYLES:
+    - 'executive': 1-2 line verdict for quick checks
+    - 'standard': Verdict + key reasons (default)
+    - 'detailed': Full analysis with all metrics
+    - 'metrics': KPI-focused with health verdict
     """
     prisma = await get_prisma()
     
-    # Check if required parameters are missing
-    missing_params = []
+    # ===== CONFIGURABLE THRESHOLDS =====
+    WORKFRONT_READINESS_THRESHOLD = 70.0
+    SPI_THRESHOLD = 0.95
+    FORECAST_DELAY_THRESHOLD = 30
+    FLOAT_FRAGILE_THRESHOLD = 5.0
+    FLOAT_SAFE_THRESHOLD = 10.0
     
+    # Normalize response_style
+    style = (response_style or "standard").lower().strip()
+    if style not in ["executive", "standard", "detailed", "metrics"]:
+        style = "standard"
+    
+    # ===== PARAMETER VALIDATION =====
     if not project_id:
-        # Get available projects to show user
         try:
-            # Get unique projects by fetching records and deduplicating
-            all_records = await prisma.sratable.find_many(
+            all_records = await prisma.sraactivitytable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
-            # Deduplicate by project_id
             seen = set()
             unique_projects = []
             for p in all_records:
@@ -88,93 +108,263 @@ async def sra_status_pei(
                         break
             
             project_list = "\n".join([f"  - {p.projectId}: {p.projectName}" for p in unique_projects])
-            missing_params.append(f"Please specify which project. Available projects:\n{project_list}")
-        except Exception as e:
-            missing_params.append(f"Please specify which project to analyze")
-    
-    if not start_date:
-        # Get date range for the project (or all projects)
-        try:
-            date_query = {"projectId": project_id} if project_id else None
-            min_date_rec = await prisma.sratable.find_first(where=date_query, order={"date": "asc"})
-            max_date_rec = await prisma.sratable.find_first(where=date_query, order={"date": "desc"})
-            
-            if min_date_rec and max_date_rec:
-                date_from = min_date_rec.date.strftime("%Y-%m-%d")
-                date_to = max_date_rec.date.strftime("%Y-%m-%d")
-                missing_params.append(f"**Date or Date Range** - Please specify a date within the available range: **{date_from}** to **{date_to}**")
-            else:
-                missing_params.append("**Date or Date Range** - Please specify a date in YYYY-MM-DD format")
+            return f"📋 **Which project?**\n\nAvailable projects:\n{project_list}\n\n💡 Example: *Is PRJ001 on track?*"
         except:
-            missing_params.append("**Date or Date Range** - Please specify a date in YYYY-MM-DD format (e.g., '2025-07-15')")
-    
-    # If any parameters are missing, return a request for them
-    if missing_params:
-        response = "📋 **I need more information to get the PEI status:**\n\n"
-        response += "\n\n".join(missing_params)
-        response += "\n\n💡 Example: *Show PEI status for PRJ_001 on 2025-07-15*"
-        return response
+            return "📋 **Please specify which project to check.**"
     
     try:
-        # Build query filters
-        where_conditions = {}
+        # Build query - use latest date if not specified
+        where_conditions = {"projectId": project_id}
         
-        if project_id:
-            where_conditions["projectId"] = project_id
+        if date:
+            target_date = parse_date(date)
+            if target_date:
+                where_conditions["date"] = {
+                    "gte": datetime.combine(target_date, datetime.min.time()),
+                    "lte": datetime.combine(target_date, datetime.max.time())
+                }
         
-        # Parse dates
-        start = parse_date(start_date) if start_date else None
-        end = parse_date(end_date) if end_date else start
-        
-        if start and end:
-            where_conditions["date"] = {
-                "gte": datetime.combine(start, datetime.min.time()),
-                "lte": datetime.combine(end, datetime.max.time())
-            }
-        elif start:
-            where_conditions["date"] = {
-                "gte": datetime.combine(start, datetime.min.time())
-            }
-        
-        # Query the database
-        records = await prisma.sratable.find_many(
-            where=where_conditions if where_conditions else None,
-            order={"date": "desc"},
-            take=10  # Limit results
+        # Query activities
+        records = await prisma.sraactivitytable.find_many(
+            where=where_conditions,
+            order={"date": "desc"}
         )
         
         if not records:
-            return "No SRA data found for the specified criteria. Please check the project ID and date range."
+            # If date specified but no data, suggest available dates
+            if date:
+                date_query = {"projectId": project_id}
+                min_rec = await prisma.sraactivitytable.find_first(where=date_query, order={"date": "asc"})
+                max_rec = await prisma.sraactivitytable.find_first(where=date_query, order={"date": "desc"})
+                if min_rec and max_rec:
+                    return f"No data for {date}. Available range: **{min_rec.date.strftime('%Y-%m-%d')}** to **{max_rec.date.strftime('%Y-%m-%d')}**"
+            return f"No data found for project {project_id}. Please verify the project ID."
         
-        # Format response
-        results = []
-        has_issues = False
+        # ===== AGGREGATE METRICS =====
+        latest_date = records[0].date
+        latest_records = [r for r in records if r.date == latest_date]
         
-        for record in records:
-            pei = record.peiValue
-            status_icon = "🟢" if pei < 1 else "🟠"
+        project_name = latest_records[0].projectName
+        
+        # Workfront Readiness
+        workfront_readiness = sum(r.workfrontReadinessPct for r in latest_records) / len(latest_records)
+        
+        # SPI (weighted by planned value)
+        total_pv = sum(r.plannedValueAmount for r in latest_records)
+        if total_pv > 0:
+            spi_value = sum(r.spiValue * r.plannedValueAmount for r in latest_records) / total_pv
+        else:
+            spi_value = sum(r.spiValue for r in latest_records) / len(latest_records)
+        
+        # Forecast Delay
+        forecast_delay_days = latest_records[0].forecastDelayDays
+        
+        # Float Health Index
+        critical_activities = [r for r in latest_records if r.isCriticalFlag == 1]
+        near_critical = [r for r in latest_records if r.totalFloatDays <= 5 and r.isCriticalFlag == 0]
+        float_activities = critical_activities + near_critical
+        
+        if float_activities:
+            float_health_index = sum(r.totalFloatDays for r in float_activities) / len(float_activities)
+        else:
+            float_health_index = sum(r.avgFloat for r in latest_records) / len(latest_records)
+        
+        # PEI & CPI for context
+        pei_value = sum(r.peiValue for r in latest_records) / len(latest_records)
+        if total_pv > 0:
+            cpi_value = sum(r.cpiValue * r.plannedValueAmount for r in latest_records) / total_pv
+        else:
+            cpi_value = sum(r.cpiValue for r in latest_records) / len(latest_records)
+        
+        # ===== GATED HEALTH CLASSIFICATION =====
+        status = "OK"
+        status_icon = "✅"
+        primary_reason = ""
+        secondary_reasons = []
+        
+        # Gate 1: Workfront Readiness (Reality Gate)
+        if workfront_readiness < WORKFRONT_READINESS_THRESHOLD:
+            status = "NOT OK"
+            status_icon = "🔴"
+            primary_reason = f"Only {workfront_readiness:.0f}% workfronts available - plan is not executable"
+        
+        # Gate 2: SPI (Schedule Signal)
+        elif spi_value < SPI_THRESHOLD:
+            status = "NOT OK"
+            status_icon = "🔴"
+            primary_reason = f"SPI at {spi_value:.2f} - schedule is unreliable"
+        
+        # Gate 3: Forecast Delay (Time Tolerance)
+        elif forecast_delay_days > FORECAST_DELAY_THRESHOLD:
+            status = "NOT OK"
+            status_icon = "🔴"
+            primary_reason = f"{forecast_delay_days}-day forecast delay - material slippage"
+        
+        # Gate 4: Float (Fragility)
+        elif float_health_index < FLOAT_FRAGILE_THRESHOLD:
+            status = "OK BUT FRAGILE"
+            status_icon = "🟡"
+            primary_reason = f"Only {float_health_index:.1f} days float on critical path - no recovery buffer"
+        
+        else:
+            status = "OK"
+            status_icon = "✅"
+            primary_reason = "Schedule is healthy with adequate buffer"
+        
+        # Build secondary reasons for detailed output
+        if workfront_readiness < WORKFRONT_READINESS_THRESHOLD:
+            secondary_reasons.append(f"Workfront at {workfront_readiness:.0f}%")
+        if spi_value < SPI_THRESHOLD:
+            secondary_reasons.append(f"SPI at {spi_value:.2f}")
+        if forecast_delay_days > FORECAST_DELAY_THRESHOLD:
+            secondary_reasons.append(f"{forecast_delay_days}d delay")
+        if float_health_index < FLOAT_FRAGILE_THRESHOLD:
+            secondary_reasons.append(f"Float only {float_health_index:.1f}d")
+        
+        date_str = latest_date.strftime('%Y-%m-%d')
+        
+        # ===== FORMAT RESPONSE BY STYLE =====
+        
+        # ----- EXECUTIVE STYLE (1-2 lines) -----
+        if style == "executive":
+            if status == "OK":
+                return f"{status_icon} **{status}** — {project_name} is on track as of {date_str}."
+            elif status == "OK BUT FRAGILE":
+                return f"{status_icon} **{status}** — {project_name}: {primary_reason}."
+            else:
+                return f"{status_icon} **{status}** — {project_name}: {primary_reason}."
+        
+        # ----- METRICS STYLE (KPI-focused with verdict) -----
+        if style == "metrics":
+            response = f"## {status_icon} {status} — {project_name}\n"
+            response += f"*As of {date_str}*\n\n"
             
-            if pei >= 1:
-                has_issues = True
+            response += "| Metric | Value | Status |\n"
+            response += "|--------|-------|--------|\n"
+            response += f"| SPI | {spi_value:.4f} | {'✅' if spi_value >= SPI_THRESHOLD else '❌'} |\n"
+            response += f"| PEI | {pei_value:.4f} | {'✅' if pei_value < 0.90 else '⚠️'} |\n"
+            response += f"| CPI | {cpi_value:.4f} | {'✅' if cpi_value >= 1.0 else '⚠️'} |\n"
+            response += f"| Workfront | {workfront_readiness:.1f}% | {'✅' if workfront_readiness >= WORKFRONT_READINESS_THRESHOLD else '❌'} |\n"
+            response += f"| Forecast Delay | {forecast_delay_days}d | {'✅' if forecast_delay_days <= FORECAST_DELAY_THRESHOLD else '❌'} |\n"
+            response += f"| Float Health | {float_health_index:.1f}d | {'✅' if float_health_index >= FLOAT_FRAGILE_THRESHOLD else '⚠️'} |\n\n"
             
-            results.append(
-                f"{status_icon} **{record.projectName}** ({record.projectId})\n"
-                f"   📅 Date: {record.date.strftime('%Y-%m-%d')}\n"
-                f"   📊 PEI Value: {pei:.4f}\n"
-                f"   📈 SPI: {record.spiValue:.4f} | CPI: {record.cpiValue:.4f}\n"
-                f"   🏗️ Progress: {record.executableProgressPct:.2f}%"
-            )
+            response += f"**Verdict**: {primary_reason}"
+            return response
         
-        response = "## SRA Status Report - PEI Analysis\n\n"
-        response += "\n\n---\n\n".join(results)
+        # ----- STANDARD STYLE (Verdict + key reasons) -----
+        if style == "standard":
+            response = f"## {status_icon} Schedule Health: **{status}**\n\n"
+            response += f"**{project_name}** — as of {date_str}\n\n"
+            
+            if status == "OK":
+                response += f"Schedule health is **OK**.\n"
+                response += f"- SPI: **{spi_value:.2f}** ✓\n"
+                response += f"- Forecast delay: **{forecast_delay_days}d** ✓\n"
+                response += f"- Workfront: **{workfront_readiness:.0f}%** ✓\n"
+                response += f"- Float buffer: **{float_health_index:.1f}d** ✓\n\n"
+                response += "**No immediate schedule intervention required.**"
+            
+            elif status == "OK BUT FRAGILE":
+                response += f"Schedule health is **OK but FRAGILE**.\n\n"
+                response += f"All primary gates pass, however:\n"
+                response += f"- ⚠️ {primary_reason}\n\n"
+                response += f"**Key Metrics**: SPI {spi_value:.2f} | Delay {forecast_delay_days}d | Workfront {workfront_readiness:.0f}%\n\n"
+                response += "💡 Monitor float consumption closely. Prepare contingencies."
+            
+            else:  # NOT OK
+                response += f"Schedule health is **NOT OK**.\n\n"
+                response += f"**Issue**: {primary_reason}\n\n"
+                response += f"**Key Metrics**: SPI {spi_value:.2f} | Delay {forecast_delay_days}d | Workfront {workfront_readiness:.0f}% | Float {float_health_index:.1f}d\n\n"
+                response += "💡 Use `sra_drill_delay` to identify root causes."
+            
+            return response
         
-        # Add recommendation if there are issues
-        if has_issues:
-            response += "\n\n---\n\n"
-            response += "⚠️ **Attention Required**: Some projects have PEI ≥ 1, indicating potential issues.\n"
-            response += "💡 **Suggestion**: Use `sra_drill_delay` to analyze the root causes of delays."
+        # ----- DETAILED STYLE (Full analysis) -----
+        if style == "detailed":
+            response = f"## {status_icon} Schedule Health: **{status}**\n\n"
+            response += f"**Project**: {project_name} ({project_id})\n"
+            response += f"**As of**: {date_str}\n\n"
+            response += "---\n\n"
+            
+            # Status Assessment
+            if status == "OK":
+                response += "### ✅ Status Assessment\n\n"
+                response += "Schedule health is **OK**.\n\n"
+                response += f"| Gate | Metric | Value | Threshold | Result |\n"
+                response += f"|------|--------|-------|-----------|--------|\n"
+                response += f"| Reality | Workfront Readiness | {workfront_readiness:.1f}% | ≥70% | ✅ Pass |\n"
+                response += f"| Schedule | SPI | {spi_value:.4f} | ≥0.95 | ✅ Pass |\n"
+                response += f"| Tolerance | Forecast Delay | {forecast_delay_days}d | ≤30d | ✅ Pass |\n"
+                response += f"| Fragility | Float Health | {float_health_index:.1f}d | ≥5d | ✅ Pass |\n\n"
+                response += "**No immediate schedule intervention required.**\n\n"
+            
+            elif status == "OK BUT FRAGILE":
+                response += "### 🟡 Status Assessment\n\n"
+                response += "Schedule health is **OK but FRAGILE**.\n\n"
+                response += f"| Gate | Metric | Value | Threshold | Result |\n"
+                response += f"|------|--------|-------|-----------|--------|\n"
+                response += f"| Reality | Workfront Readiness | {workfront_readiness:.1f}% | ≥70% | ✅ Pass |\n"
+                response += f"| Schedule | SPI | {spi_value:.4f} | ≥0.95 | ✅ Pass |\n"
+                response += f"| Tolerance | Forecast Delay | {forecast_delay_days}d | ≤30d | ✅ Pass |\n"
+                response += f"| Fragility | Float Health | {float_health_index:.1f}d | ≥5d | ⚠️ Fragile |\n\n"
+                response += f"**Issue**: {primary_reason}\n\n"
+                response += "💡 **Recommendation**: Monitor float consumption closely and prepare contingencies.\n\n"
+            
+            else:  # NOT OK
+                response += "### 🔴 Status Assessment\n\n"
+                response += "Schedule health is **NOT OK**.\n\n"
+                response += f"**Primary Issue**: {primary_reason}\n\n"
+                
+                wf_result = "✅ Pass" if workfront_readiness >= WORKFRONT_READINESS_THRESHOLD else "❌ FAIL"
+                spi_result = "✅ Pass" if spi_value >= SPI_THRESHOLD else "❌ FAIL"
+                delay_result = "✅ Pass" if forecast_delay_days <= FORECAST_DELAY_THRESHOLD else "❌ FAIL"
+                float_result = "✅ Pass" if float_health_index >= FLOAT_FRAGILE_THRESHOLD else "⚠️ Fragile"
+                
+                response += f"| Gate | Metric | Value | Threshold | Result |\n"
+                response += f"|------|--------|-------|-----------|--------|\n"
+                response += f"| Reality | Workfront Readiness | {workfront_readiness:.1f}% | ≥70% | {wf_result} |\n"
+                response += f"| Schedule | SPI | {spi_value:.4f} | ≥0.95 | {spi_result} |\n"
+                response += f"| Tolerance | Forecast Delay | {forecast_delay_days}d | ≤30d | {delay_result} |\n"
+                response += f"| Fragility | Float Health | {float_health_index:.1f}d | ≥5d | {float_result} |\n\n"
+                response += "💡 **Recommendation**: Recovery actions required. Use `sra_drill_delay` to identify root causes.\n\n"
+            
+            # Contextual Metrics
+            response += "---\n\n"
+            response += "### 📊 Contextual Metrics\n\n"
+            
+            pei_icon = "🟢" if pei_value < 0.85 else ("🟡" if pei_value < 0.90 else "🔴")
+            pei_interp = "Healthy" if pei_value < 0.85 else ("Marginal" if pei_value < 0.90 else "Efficiency erosion")
+            
+            response += f"| Metric | Value | Interpretation |\n"
+            response += f"|--------|-------|----------------|\n"
+            response += f"| PEI | {pei_value:.4f} | {pei_icon} {pei_interp} |\n"
+            response += f"| CPI | {cpi_value:.4f} | {'🟢 On/Under Budget' if cpi_value >= 1.0 else '⚠️ Over Budget'} |\n"
+            response += f"| Activities | {len(latest_records)} | Critical: {len(critical_activities)} |\n\n"
+            
+            # Float interpretation
+            if float_health_index >= FLOAT_SAFE_THRESHOLD:
+                float_interp = "🟢 Structurally safe"
+            elif float_health_index >= FLOAT_FRAGILE_THRESHOLD:
+                float_interp = "🟡 Tight but manageable"
+            else:
+                float_interp = "🔴 Fragile / knife-edge"
+            
+            response += f"**Float Health Index**: {float_health_index:.1f} days → {float_interp}\n\n"
+            
+            # Decision Basis
+            response += "---\n\n"
+            response += "### ℹ️ Decision Basis\n\n"
+            response += "Health is determined by gated rules (in order):\n"
+            response += "1. **Workfront Readiness** (Reality Gate) → Is the plan executable?\n"
+            response += "2. **SPI** (Schedule Signal) → Is the schedule reliable?\n"
+            response += "3. **Forecast Delay** (Time Tolerance) → Is slippage within limits?\n"
+            response += "4. **Float Health** (Fragility Check) → Is there recovery buffer?\n\n"
+            response += "*PEI is contextual reinforcement, not the primary verdict.*"
+            
+            return response
         
-        return response
+        # Fallback
+        return f"{status_icon} **{status}** — {project_name}: {primary_reason}"
         
     except Exception as e:
         return f"Error querying SRA data: {str(e)}"
@@ -208,7 +398,7 @@ async def sra_drill_delay(
     if not project_id:
         try:
             # Get unique projects by fetching records and deduplicating
-            all_records = await prisma.sratable.find_many(
+            all_records = await prisma.sraactivitytable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -229,8 +419,8 @@ async def sra_drill_delay(
     if not start_date:
         try:
             date_query = {"projectId": project_id} if project_id else None
-            min_date_rec = await prisma.sratable.find_first(where=date_query, order={"date": "asc"})
-            max_date_rec = await prisma.sratable.find_first(where=date_query, order={"date": "desc"})
+            min_date_rec = await prisma.sraactivitytable.find_first(where=date_query, order={"date": "asc"})
+            max_date_rec = await prisma.sraactivitytable.find_first(where=date_query, order={"date": "desc"})
             
             if min_date_rec and max_date_rec:
                 date_from = min_date_rec.date.strftime("%Y-%m-%d")
@@ -244,7 +434,7 @@ async def sra_drill_delay(
     if missing_params:
         response = "📋 **I need more information to analyze delays:**\n\n"
         response += "\n\n".join(missing_params)
-        response += "\n\n💡 Example: *Analyze delays for PROJECT on 2025-07-15*"
+        response += "\n\n💡 Example: *Analyze delays for PRJ001 on 2025-01-15*"
         return response
     
     try:
@@ -264,58 +454,127 @@ async def sra_drill_delay(
                 "lte": datetime.combine(end, datetime.max.time())
             }
         
-        # Get records with delays
-        records = await prisma.sratable.find_many(
+        # Get all activities for the project
+        records = await prisma.sraactivitytable.find_many(
             where=where_conditions if where_conditions else None,
-            order={"criticalDelayDays": "desc"},
-            take=10
+            order={"date": "desc"}
         )
         
         if not records:
             return "No delay data found for the specified criteria."
         
-        # Format response
-        results = []
+        # Get latest date's records
+        latest_date = records[0].date
+        latest_records = [r for r in records if r.date == latest_date]
         
-        for record in records:
-            delay_status = "🔴" if record.criticalDelayDays > 0 else "🟢"
-            delay_owner = record.topDelayOwnerCategory or "None"
+        project_name = latest_records[0].projectName
+        forecast_delay_days = latest_records[0].forecastDelayDays
+        
+        # Identify critical activities with low float (potential delay drivers)
+        critical_activities = [r for r in latest_records if r.isCriticalFlag == 1]
+        low_float_activities = [r for r in latest_records if r.totalFloatDays < 5]
+        delayed_activities = [r for r in latest_records if r.forecastDelayDays > 0]
+        
+        response = f"## � SRA Delay Analysis\n\n"
+        response += f"**Project**: {project_name} ({project_id})\n"
+        response += f"**Date**: {latest_date.strftime('%Y-%m-%d')}\n"
+        response += f"**Forecast Delay**: {forecast_delay_days} days\n\n"
+        response += "---\n\n"
+        
+        # Critical Activities Analysis
+        response += "### 🔴 Critical Path Activities\n\n"
+        if critical_activities:
+            response += f"Found **{len(critical_activities)}** critical activities:\n\n"
+            response += "| Activity | Float (days) | SPI | Status |\n"
+            response += "|----------|--------------|-----|--------|\n"
+            for act in critical_activities[:10]:  # Top 10
+                float_status = "⚠️" if act.totalFloatDays < 5 else "✅"
+                spi_status = "⚠️" if act.spiValue < 0.95 else "✅"
+                response += f"| {act.activityName} | {act.totalFloatDays:.1f} {float_status} | {act.spiValue:.3f} {spi_status} | {'Critical' if act.isCriticalFlag else ''} |\n"
+        else:
+            response += "No critical activities identified.\n"
+        
+        response += "\n---\n\n"
+        
+        # Low Float Activities (Float Erosion Analysis)
+        response += "### ⚠️ Float Erosion - Activities with Low Buffer\n\n"
+        if low_float_activities:
+            response += f"Found **{len(low_float_activities)}** activities with float < 5 days:\n\n"
+            # Sort by float ascending
+            low_float_sorted = sorted(low_float_activities, key=lambda x: x.totalFloatDays)
+            response += "| Activity | Float (days) | Critical? | Risk |\n"
+            response += "|----------|--------------|-----------|------|\n"
+            for act in low_float_sorted[:10]:
+                risk = "🔴 High" if act.totalFloatDays < 2 else "🟡 Medium"
+                crit = "Yes" if act.isCriticalFlag == 1 else "No"
+                response += f"| {act.activityName} | {act.totalFloatDays:.1f} | {crit} | {risk} |\n"
+        else:
+            response += "✅ No activities with critically low float.\n"
+        
+        response += "\n---\n\n"
+        
+        # Schedule Variance Analysis
+        response += "### 📊 Schedule Variance Analysis\n\n"
+        
+        # Calculate schedule variance for activities
+        variance_analysis = []
+        for act in latest_records:
+            planned = act.plannedFinishDate
+            forecast = act.forecastFinishDate
+            if planned and forecast:
+                variance = (forecast - planned).days
+                variance_analysis.append({
+                    "name": act.activityName,
+                    "variance": variance,
+                    "is_critical": act.isCriticalFlag == 1
+                })
+        
+        if variance_analysis:
+            # Sort by variance descending (most delayed first)
+            variance_sorted = sorted(variance_analysis, key=lambda x: -x["variance"])
+            most_delayed = [v for v in variance_sorted if v["variance"] > 0][:5]
             
-            # Calculate schedule variance
-            planned = record.plannedFinishDate
-            forecast = record.forecastFinishDate
-            variance_days = (forecast - planned).days if planned and forecast else 0
-            
-            results.append(
-                f"{delay_status} **{record.projectName}** ({record.projectId})\n"
-                f"   📅 Report Date: {record.date.strftime('%Y-%m-%d')}\n"
-                f"   ⏰ Critical Delay: **{record.criticalDelayDays} days**\n"
-                f"   👤 Delay Owner: {delay_owner}\n"
-                f"   📅 Planned Finish: {planned.strftime('%Y-%m-%d') if planned else 'N/A'}\n"
-                f"   📅 Forecast Finish: {forecast.strftime('%Y-%m-%d') if forecast else 'N/A'}\n"
-                f"   📊 Schedule Variance: {variance_days:+d} days\n"
-                f"   🎯 Lookahead Compliance: {record.lookaheadCompliancePct:.1%}"
-            )
+            if most_delayed:
+                response += "**Top Delayed Activities**:\n\n"
+                response += "| Activity | Variance | Critical? |\n"
+                response += "|----------|----------|----------|\n"
+                for act in most_delayed:
+                    crit = "🔴 Yes" if act["is_critical"] else "No"
+                    response += f"| {act['name']} | +{act['variance']} days | {crit} |\n"
+            else:
+                response += "✅ No activities are forecasted to finish late.\n"
         
-        response = "## SRA Delay Analysis\n\n"
-        response += "\n\n---\n\n".join(results)
+        response += "\n---\n\n"
         
-        # Summary
-        total_delay = sum(r.criticalDelayDays for r in records)
-        avg_delay = total_delay / len(records) if records else 0
+        # Summary Statistics
+        response += "### 📈 Summary Statistics\n\n"
+        avg_spi = sum(r.spiValue for r in latest_records) / len(latest_records)
+        avg_float = sum(r.totalFloatDays for r in latest_records) / len(latest_records)
+        avg_workfront = sum(r.workfrontReadinessPct for r in latest_records) / len(latest_records)
         
-        # Count delay owners
-        owners = {}
-        for r in records:
-            owner = r.topDelayOwnerCategory or "Unknown"
-            owners[owner] = owners.get(owner, 0) + 1
+        response += f"- **Total Activities Analyzed**: {len(latest_records)}\n"
+        response += f"- **Critical Activities**: {len(critical_activities)}\n"
+        response += f"- **Low Float Activities**: {len(low_float_activities)}\n"
+        response += f"- **Average SPI**: {avg_spi:.4f}\n"
+        response += f"- **Average Float**: {avg_float:.1f} days\n"
+        response += f"- **Average Workfront Readiness**: {avg_workfront:.1f}%\n\n"
         
-        response += "\n\n---\n\n### Summary\n"
-        response += f"- **Average Critical Delay**: {avg_delay:.1f} days\n"
-        response += f"- **Records Analyzed**: {len(records)}\n"
-        response += "- **Delay Owners**:\n"
-        for owner, count in sorted(owners.items(), key=lambda x: -x[1]):
-            response += f"  - {owner}: {count} occurrences\n"
+        # Root Cause Indicators
+        response += "### 🎯 Potential Root Causes\n\n"
+        
+        if avg_workfront < 70:
+            response += "- ❌ **Workfront Constraint**: Low workfront readiness ({:.1f}%) suggests material/ROW/access issues\n".format(avg_workfront)
+        if avg_spi < 0.95:
+            response += "- ❌ **Schedule Performance**: Low SPI ({:.4f}) indicates execution falling behind plan\n".format(avg_spi)
+        if len(low_float_activities) > len(latest_records) * 0.3:
+            response += "- ❌ **Float Erosion**: {:.0f}% of activities have critically low float\n".format(len(low_float_activities)/len(latest_records)*100)
+        if len(critical_activities) > 0 and avg_float < 5:
+            response += "- ❌ **Critical Path Stress**: Critical activities have minimal buffer\n"
+        
+        if avg_workfront >= 70 and avg_spi >= 0.95:
+            response += "- ✅ No major systemic issues detected. Consider activity-level interventions.\n"
+        
+        response += "\n💡 **Next Steps**: Use `sra_recovery_advise` for recovery options."
         
         return response
         
@@ -374,7 +633,7 @@ async def sra_recovery_advise(
     # Check if required parameters are missing
     if not project_id:
         try:
-            all_records = await prisma.sratable.find_many(
+            all_records = await prisma.sraactivitytable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -394,7 +653,7 @@ async def sra_recovery_advise(
     
     try:
         # Get latest project data
-        latest_record = await prisma.sratable.find_first(
+        latest_record = await prisma.sraactivitytable.find_first(
             where={"projectId": project_id},
             order={"date": "desc"}
         )
@@ -406,8 +665,9 @@ async def sra_recovery_advise(
         response += f"**Current Status:**\n"
         response += f"- 📊 PEI: {latest_record.peiValue:.4f}\n"
         response += f"- 📈 SPI: {latest_record.spiValue:.4f}\n"
-        response += f"- ⏰ Critical Delay: {latest_record.criticalDelayDays} days\n"
-        response += f"- 👤 Top Delay Owner: {latest_record.topDelayOwnerCategory or 'N/A'}\n\n"
+        response += f"- ⏰ Forecast Delay: {latest_record.forecastDelayDays} days\n"
+        response += f"- 🏗️ Workfront Readiness: {latest_record.workfrontReadinessPct:.1f}%\n"
+        response += f"- 📐 Float: {latest_record.avgFloat:.1f} days\n\n"
         
         response += "---\n\n### 💡 Recovery Options:\n\n"
         
@@ -440,6 +700,15 @@ async def sra_recovery_advise(
             response += f"- Focus fast-tracking around activity {activity_id}\n"
         response += "- Estimated schedule recovery: 4-6 days\n"
         response += "- Risk: High (increased coordination needed)\n\n"
+        
+        # Option 5: Workfront Resolution (if applicable)
+        if latest_record.workfrontReadinessPct < 70:
+            response += "**Option 5: Workfront Resolution** 🚧\n"
+            response += f"- Current workfront readiness is only {latest_record.workfrontReadinessPct:.1f}%\n"
+            response += "- Clear material/ROW/access constraints\n"
+            response += "- Coordinate with procurement/land teams\n"
+            response += "- Estimated schedule recovery: 5-10 days\n"
+            response += "- Risk: Low-Medium (depends on constraint type)\n\n"
         
         response += "---\n\n"
         response += "💡 **Next Steps**: Use `sra_simulate` to model the impact of these options, or `sra_create_action` to log your chosen recovery strategy."
@@ -475,7 +744,7 @@ async def sra_simulate(
     
     if not project_id:
         try:
-            all_records = await prisma.sratable.find_many(
+            all_records = await prisma.sraactivitytable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -507,7 +776,7 @@ async def sra_simulate(
     
     try:
         # Get latest project data
-        latest_record = await prisma.sratable.find_first(
+        latest_record = await prisma.sraactivitytable.find_first(
             where={"projectId": project_id},
             order={"date": "desc"}
         )
@@ -516,7 +785,7 @@ async def sra_simulate(
             return f"No data found for project {project_id}. Please verify the project ID."
         
         # Simulation logic (simplified model)
-        current_delay = latest_record.criticalDelayDays
+        current_delay = latest_record.forecastDelayDays
         current_spi = latest_record.spiValue
         
         # Calculate simulated impact based on resource type
@@ -556,7 +825,7 @@ async def sra_simulate(
         response += "### 📈 Projected Impact:\n\n"
         response += "| Metric | Current | Projected | Change |\n"
         response += "|--------|---------|-----------|--------|\n"
-        response += f"| Critical Delay | {current_delay} days | {new_delay} days | **-{days_recovered} days** |\n"
+        response += f"| Forecast Delay | {current_delay} days | {new_delay} days | **-{days_recovered} days** |\n"
         response += f"| SPI | {current_spi:.4f} | {new_spi:.4f} | +{(new_spi - current_spi):.4f} |\n"
         response += f"| Productivity | Baseline | +{productivity_factor*100:.1f}% | ✅ Improved |\n\n"
         
@@ -608,7 +877,7 @@ async def sra_create_action(
     
     if not project_id:
         try:
-            all_records = await prisma.sratable.find_many(
+            all_records = await prisma.sraactivitytable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -637,7 +906,7 @@ async def sra_create_action(
     
     try:
         # Get latest project data for context
-        latest_record = await prisma.sratable.find_first(
+        latest_record = await prisma.sraactivitytable.find_first(
             where={"projectId": project_id},
             order={"date": "desc"}
         )
@@ -672,7 +941,7 @@ async def sra_create_action(
         response += "### 📊 Current Project Context:\n"
         if latest_record:
             response += f"- PEI: {latest_record.peiValue:.4f}\n"
-            response += f"- Critical Delay: {latest_record.criticalDelayDays} days\n"
+            response += f"- Forecast Delay: {latest_record.forecastDelayDays} days\n"
             response += f"- SPI: {latest_record.spiValue:.4f}\n\n"
         
         response += "💡 **Note**: This action has been logged for tracking. The assigned user will receive a notification."
@@ -713,7 +982,7 @@ async def sra_explain_formula(
     project_context = None
     if project_id:
         try:
-            latest_record = await prisma.sratable.find_first(
+            latest_record = await prisma.sraactivitytable.find_first(
                 where={"projectId": project_id},
                 order={"date": "desc"}
             )
@@ -813,4 +1082,4 @@ async def sra_explain_formula(
 
 
 # Export tools list for the agent
-SRA_TOOLS = [sra_status_pei, sra_drill_delay, sra_recovery_advise, sra_simulate, sra_create_action, sra_explain_formula]
+SRA_TOOLS = [sra_status_pei]
