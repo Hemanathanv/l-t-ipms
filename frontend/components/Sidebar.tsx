@@ -1,5 +1,14 @@
 'use client';
 
+import React, { useState } from "react"
+import { Menu, X, Plus, Trash2 } from 'lucide-react';
+import {
+    Sidebar as SidebarUI,
+    SidebarContent as SidebarUIContent,
+    SidebarHeader,
+    SidebarTrigger,
+    useSidebar,
+} from '@/components/ui/sidebar';
 import { useConversations, useDeleteConversation } from '@/actions/useConversations';
 import { Conversation } from '@/lib/types';
 
@@ -7,8 +16,6 @@ interface SidebarProps {
     currentThreadId: string | null;
     onSelectConversation: (threadId: string) => void;
     onNewChat: () => void;
-    isOpen: boolean;
-    onClose: () => void;
 }
 
 function formatDate(dateString: string) {
@@ -25,15 +32,14 @@ function formatDate(dateString: string) {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-export function Sidebar({
+function SidebarInnerContent({
     currentThreadId,
     onSelectConversation,
     onNewChat,
-    isOpen,
-    onClose
-}: SidebarProps) {
+}: Omit<SidebarProps, 'isOpen' | 'onClose'>) {
     const { data: conversations, isLoading } = useConversations();
     const deleteConversation = useDeleteConversation();
+    const { setOpen } = useSidebar();
 
     const handleDelete = async (e: React.MouseEvent, threadId: string) => {
         e.stopPropagation();
@@ -46,42 +52,103 @@ export function Sidebar({
     };
 
     return (
-        <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
-            <div className="sidebar-header">
-                <h1 className="logo">L&T-IPMS</h1>
-                <button className="new-chat-btn" onClick={() => { onNewChat(); onClose(); }}>
-                    <span className="icon">+</span> New Chat
+        <>
+            <SidebarHeader className="border-b">
+                {/* Logo and Trigger Row */}
+                <div className="sidebar-header-row">
+                    {/* Logo - always visible */}
+                    <div className="sidebar-logo">
+                        <img
+                            src="/logo.png"
+                            alt="L&T-IPMS"
+                            className="w-8 h-8 object-contain"
+                            onError={(e) => {
+                                // Fallback to text if image doesn't exist
+                                e.currentTarget.style.display = 'none';
+                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                            }}
+                        />
+                        <span className="hidden text-lg font-bold text-blue-600">LT</span>
+                    </div>
+
+                    {/* Title - hidden when collapsed */}
+                    <h1 className="sidebar-title group-data-[collapsible=icon]:hidden">
+                        L&T-IPMS
+                    </h1>
+
+                    {/* Sidebar Trigger - on right, hidden when collapsed, appears on hover */}
+                    <div className="sidebar-trigger-wrapper">
+                        <SidebarTrigger className="sidebar-trigger-btn" />
+                    </div>
+                </div>
+
+                {/* New Chat Button */}
+                <button
+                    onClick={() => {
+                        onNewChat();
+                        setOpen(false);
+                    }}
+                    className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:mt-2"
+                >
+                    <Plus size={18} />
+                    <span className="group-data-[collapsible=icon]:hidden">New Chat</span>
                 </button>
-            </div>
-            <div className="conversations-list">
+            </SidebarHeader>
+            <SidebarUIContent className="flex flex-col gap-1 p-3 group-data-[collapsible=icon]:hidden">
                 {isLoading ? (
-                    <p style={{ padding: '16px', color: 'var(--text-muted)' }}>Loading...</p>
+                    <p className="text-sm text-gray-500 text-center py-4">Loading...</p>
                 ) : !conversations?.length ? (
-                    <p style={{ padding: '16px', color: 'var(--text-muted)' }}>No conversations yet</p>
+                    <p className="text-sm text-gray-500 text-center py-4">No conversations yet</p>
                 ) : (
                     conversations.map((conv: Conversation) => (
                         <div
                             key={conv.threadId}
-                            className={`conversation-item ${conv.threadId === currentThreadId ? 'active' : ''}`}
-                            onClick={() => { onSelectConversation(conv.threadId); onClose(); }}
+                            className={`group p-3 rounded-lg cursor-pointer transition-all ${conv.threadId === currentThreadId
+                                ? 'bg-blue-100 border border-blue-300'
+                                : 'hover:bg-gray-100 border border-transparent'
+                                }`}
+                            onClick={() => {
+                                onSelectConversation(conv.threadId);
+                                setOpen(false);
+                            }}
                         >
-                            <div className="conversation-content">
-                                <div className="conversation-title">{conv.title || 'Untitled'}</div>
-                                <div className="conversation-date">{formatDate(conv.createdAt)}</div>
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                        {conv.title || 'Untitled'}
+                                    </p>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {formatDate(conv.createdAt)}
+                                    </p>
+                                </div>
+                                <button
+                                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-100 rounded transition-all"
+                                    onClick={(e) => handleDelete(e, conv.threadId)}
+                                    title="Delete conversation"
+                                >
+                                    <Trash2 size={14} className="text-red-600" />
+                                </button>
                             </div>
-                            <button
-                                className="delete-btn"
-                                onClick={(e) => handleDelete(e, conv.threadId)}
-                                title="Delete conversation"
-                            >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                                </svg>
-                            </button>
                         </div>
                     ))
                 )}
-            </div>
-        </aside>
+            </SidebarUIContent>
+        </>
+    );
+}
+
+export function Sidebar({
+    currentThreadId,
+    onSelectConversation,
+    onNewChat,
+}: SidebarProps) {
+    return (
+        <SidebarUI collapsible="icon">
+            <SidebarInnerContent
+                currentThreadId={currentThreadId}
+                onSelectConversation={onSelectConversation}
+                onNewChat={onNewChat}
+            />
+        </SidebarUI>
     );
 }

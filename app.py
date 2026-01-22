@@ -664,11 +664,11 @@ async def get_conversation(thread_id: str):
     """
     Retrieve the full conversation history for a given thread.
     
-    Checks: Redis cache -> LangGraph checkpointer -> Prisma messages
+    Checks: Redis cache -> Prisma messages (faster) -> LangGraph checkpointer (slower)
     """
     global _agent
     
-    # Try cache first
+    # 1. Try cache first (fastest)
     cache = await get_redis_cache()
     cached_messages = await cache.get_conversation_cache(thread_id)
     
@@ -678,7 +678,38 @@ async def get_conversation(thread_id: str):
             messages=[MessageSchema(**m) for m in cached_messages],
         )
     
-    # Try LangGraph checkpointer
+    # 2. Try Prisma messages table (faster than checkpointer)
+    try:
+        prisma = await get_prisma()
+        conversation = await prisma.conversation.find_unique(
+            where={"threadId": thread_id},
+            include={"messages": True}
+        )
+        
+        if conversation and conversation.messages:
+            # Sort messages by createdAt in Python (Prisma Python doesn't support order in includes)
+            sorted_messages = sorted(conversation.messages, key=lambda m: m.createdAt or datetime.min)
+            messages = [
+                {
+                    "role": msg.role,
+                    "content": msg.content,
+                    "created_at": msg.createdAt.isoformat() if msg.createdAt else None
+                }
+                for msg in sorted_messages
+            ]
+            
+            # Cache for next time
+            await cache.set_conversation_cache(thread_id, messages)
+            
+            return ConversationHistory(
+                thread_id=thread_id,
+                messages=[MessageSchema(**m) for m in messages],
+                created_at=conversation.createdAt
+            )
+    except Exception as e:
+        print(f"Prisma lookup error: {e}")
+    
+    # 3. Fall back to LangGraph checkpointer (slowest - only if no Prisma data)
     if _agent is not None:
         try:
             history = await get_conversation_history(_agent, thread_id)
@@ -692,39 +723,7 @@ async def get_conversation(thread_id: str):
         except Exception as e:
             print(f"Checkpointer error: {e}")
     
-    # Fall back to Prisma messages table
-    try:
-        prisma = await get_prisma()
-        conversation = await prisma.conversation.find_unique(
-            where={"threadId": thread_id},
-            include={"messages": {"order": {"createdAt": "asc"}}}
-        )
-        
-        if conversation and conversation.messages:
-            messages = [
-                {
-                    "role": msg.role,
-                    "content": msg.content,
-                    "created_at": msg.createdAt.isoformat() if msg.createdAt else None
-                }
-                for msg in conversation.messages
-            ]
-            
-            # Cache for next time
-            await cache.set_conversation_cache(thread_id, messages)
-            
-            return ConversationHistory(
-                thread_id=thread_id,
-                messages=[MessageSchema(**m) for m in messages],
-                created_at=conversation.createdAt
-            )
-        
-        raise HTTPException(status_code=404, detail="Conversation not found")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving conversation: {str(e)}")
+    raise HTTPException(status_code=404, detail="Conversation not found")
 
 
 @app.delete("/conversations/{thread_id}", tags=["Conversations"])

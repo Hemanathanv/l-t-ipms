@@ -51,115 +51,47 @@ const LoginForm: React.FC = () => {
 
   return (
     <div>
-      <form onSubmit={handleSubmit} className="w-full flex flex-col" style={{ gap: '1.5rem' }} noValidate>
-        {/* Username Field */}
+      <form onSubmit={handleSubmit} className="w-full flex flex-col gap-4" noValidate>
+        {/* Email Field */}
         <div className="group relative">
           <label
-            className="block uppercase tracking-wide transition-colors"
-            style={{
-              fontSize: '0.75rem',
-              fontWeight: '700',
-              color: '#6b7280',
-              marginBottom: '0.5rem',
-            }}
+            className="block text-sm font-medium text-gray-800 mb-2"
           >
             Email
           </label>
-          <div className="relative flex items-center">
-            <User
-              className="absolute pointer-events-none transition-colors"
-              style={{
-                left: '0',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                width: '20px',
-                height: '20px',
-                color: '#9ca3af',
-              }}
-            />
-            <input
-              type="email"
-              placeholder="Type your username"
-              id="Email"
-              name="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={{
-                width: '100%',
-                paddingLeft: '2rem',
-                paddingTop: '0.5rem',
-                paddingBottom: '0.5rem',
-                backgroundColor: 'transparent',
-                borderTop: 'none',
-                borderLeft: 'none',
-                borderRight: 'none',
-                borderBottom: '1px solid #d1d5db',
-                color: '#374151',
-                fontSize: '0.875rem',
-                outline: 'none',
-              }}
-              autoComplete="email"
-            />
-          </div>
+          <input
+            type="email"
+            placeholder="your@email.com"
+            id="Email"
+            name="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-500 transition-colors"
+            autoComplete="email"
+          />
         </div>
 
         {/* Password Field */}
         <div className="group relative">
           <label
-            className="block uppercase tracking-wide transition-colors"
-            style={{
-              fontSize: '0.75rem',
-              fontWeight: '700',
-              color: '#6b7280',
-              marginBottom: '0.5rem',
-            }}
+            className="block text-sm font-medium text-gray-800 mb-2"
           >
             Password
           </label>
-          <div className="relative flex items-center">
-            <Lock
-              className="absolute pointer-events-none transition-colors"
-              style={{
-                left: '0',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                width: '20px',
-                height: '20px',
-                color: '#9ca3af',
-              }}
-            />
-            <input
-              type="password"
-              placeholder="Type your password"
-              name="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={{
-                width: '100%',
-                paddingLeft: '2rem',
-                paddingTop: '0.5rem',
-                paddingBottom: '0.5rem',
-                backgroundColor: 'transparent',
-                borderTop: 'none',
-                borderLeft: 'none',
-                borderRight: 'none',
-                borderBottom: '1px solid #d1d5db',
-                color: '#374151',
-                fontSize: '0.875rem',
-                outline: 'none',
-              }}
-              autoComplete="current-password"
-            />
-          </div>
-          <div className="text-right" style={{ marginTop: '0.5rem' }}>
+          <input
+            type="password"
+            placeholder="••••••••"
+            name="password"
+            id="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-500 transition-colors"
+            autoComplete="current-password"
+          />
+          <div className="text-right mt-2">
             <a
               href="#"
-              className="hover:underline"
-              style={{
-                fontSize: '0.75rem',
-                color: '#9ca3af',
-              }}
+              className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
             >
               Forgot password?
             </a>
@@ -167,12 +99,12 @@ const LoginForm: React.FC = () => {
         </div>
 
         {/* Login Button */}
-        <div style={{ marginTop: '1rem' }}>
+        <div className="mt-6">
           <AuthButton type="login" loading={loading} disabled={isSubmitDisabled} />
         </div>
 
         {error && (
-          <p style={{ color: '#ef4444', fontSize: '0.875rem', textAlign: 'center' }}>
+          <p className="text-sm text-red-600 text-center mt-3">
             {error}
           </p>
         )}

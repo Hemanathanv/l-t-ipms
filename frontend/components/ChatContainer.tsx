@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatHeader } from '@/components/ChatHeader';
 import { MessageList } from '@/components/MessageList';
@@ -13,10 +14,10 @@ interface ChatContainerProps {
     initialThreadId?: string;
 }
 
-export function ChatContainer({ initialThreadId }: ChatContainerProps) {
+// Inner component to access sidebar context
+function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
     const router = useRouter();
     const [selectedProjectId, setSelectedProjectId] = useState('');
-    const [sidebarOpen, setSidebarOpen] = useState(false);
 
     const {
         messages,
@@ -27,7 +28,6 @@ export function ChatContainer({ initialThreadId }: ChatContainerProps) {
         sendMessage,
         loadConversation,
         startNewChat,
-        setThreadId,
     } = useChat();
 
     // Load conversation if initialThreadId is provided
@@ -81,33 +81,58 @@ export function ChatContainer({ initialThreadId }: ChatContainerProps) {
         return 'New Conversation';
     };
 
+    const hasMessages = messages.length > 0 || isStreaming;
+
     return (
-        <div className="app-container">
+        <div className="flex h-screen w-full">
             <Sidebar
                 currentThreadId={threadId}
                 onSelectConversation={handleSelectConversation}
                 onNewChat={handleNewChat}
-                isOpen={sidebarOpen}
-                onClose={() => setSidebarOpen(false)}
             />
             <main className="main-content">
                 <ChatHeader
                     title={getChatTitle()}
                     selectedProjectId={selectedProjectId}
                     onProjectChange={setSelectedProjectId}
-                    onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
+                    hideBorder={!hasMessages}
                 />
-                <MessageList
-                    messages={messages}
-                    streamingContent={streamingContent}
-                    isStreaming={isStreaming}
-                    currentToolCall={currentToolCall}
-                />
-                <MessageInput
-                    onSend={handleSendMessage}
-                    isLoading={isStreaming}
-                />
+
+                {hasMessages ? (
+                    // Normal chat layout with messages at top, input at bottom
+                    <>
+                        <MessageList
+                            messages={messages}
+                            streamingContent={streamingContent}
+                            isStreaming={isStreaming}
+                            currentToolCall={currentToolCall}
+                        />
+                        <MessageInput
+                            onSend={handleSendMessage}
+                            isLoading={isStreaming}
+                        />
+                    </>
+                ) : (
+                    // Centered welcome layout for new conversations
+                    <div className="welcome-container">
+                        <div className="welcome-content">
+                            <h1 className="welcome-heading">What's on your mind today?</h1>
+                            <MessageInput
+                                onSend={handleSendMessage}
+                                isLoading={isStreaming}
+                            />
+                        </div>
+                    </div>
+                )}
             </main>
         </div>
+    );
+}
+
+export function ChatContainer({ initialThreadId }: ChatContainerProps) {
+    return (
+        <SidebarProvider>
+            <ChatContainerInner initialThreadId={initialThreadId} />
+        </SidebarProvider>
     );
 }
