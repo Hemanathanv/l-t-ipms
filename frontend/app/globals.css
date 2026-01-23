@@ -601,6 +601,147 @@
   border: 1px solid var(--message-assistant-border);
 }
 
+/* Markdown Styles for AI Messages */
+.message-content p {
+  margin: 0 0 12px 0;
+}
+
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+  margin: 16px 0 8px 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.message-content h1 {
+  font-size: 1.4rem;
+}
+
+.message-content h2 {
+  font-size: 1.2rem;
+}
+
+.message-content h3 {
+  font-size: 1.1rem;
+}
+
+.message-content h4 {
+  font-size: 1rem;
+}
+
+.message-content ul,
+.message-content ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.message-content li {
+  margin: 4px 0;
+}
+
+.message-content strong {
+  font-weight: 600;
+}
+
+.message-content em {
+  font-style: italic;
+}
+
+/* Inline Code */
+.message-content .inline-code,
+.message-content code:not(pre code) {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+  font-size: 0.85em;
+  color: var(--primary-color);
+}
+
+/* Code Blocks */
+.message-content .code-block,
+.message-content pre {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+  font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.message-content pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+/* Tables */
+.message-content .table-wrapper {
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.message-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.message-content th,
+.message-content td {
+  border: 1px solid var(--border-color);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.message-content th {
+  background: var(--bg-sidebar);
+  font-weight: 600;
+}
+
+.message-content tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Blockquotes */
+.message-content blockquote {
+  border-left: 4px solid var(--primary-color);
+  margin: 12px 0;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 0 4px 4px 0;
+}
+
+.message-content blockquote p {
+  margin: 0;
+}
+
+/* Links */
+.message-content a {
+  color: var(--primary-color);
+  text-decoration: underline;
+}
+
+.message-content a:hover {
+  opacity: 0.8;
+}
+
+/* Horizontal Rules */
+.message-content hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 16px 0;
+}
+
 .message-avatar {
   width: 36px;
   height: 36px;

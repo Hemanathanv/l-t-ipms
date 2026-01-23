@@ -1,6 +1,8 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Message } from '@/lib/types';
 
 interface MessageListProps {
@@ -10,18 +12,49 @@ interface MessageListProps {
     currentToolCall?: string | null;
 }
 
-function escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // Format tool name for display (e.g., sra_status_pei -> SRA Status PEI)
 function formatToolName(toolName: string): string {
     return toolName
         .split('_')
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join(' ');
+}
+
+// Markdown component for rendering AI messages
+function MarkdownContent({ content }: { content: string }) {
+    return (
+        <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+                // Custom code block rendering
+                code({ className, children, ...props }) {
+                    const match = /language-(\w+)/.exec(className || '');
+                    const isInline = !match;
+                    return isInline ? (
+                        <code className="inline-code" {...props}>
+                            {children}
+                        </code>
+                    ) : (
+                        <pre className="code-block">
+                            <code className={className} {...props}>
+                                {children}
+                            </code>
+                        </pre>
+                    );
+                },
+                // Custom table rendering
+                table({ children }) {
+                    return (
+                        <div className="table-wrapper">
+                            <table>{children}</table>
+                        </div>
+                    );
+                },
+            }}
+        >
+            {content}
+        </ReactMarkdown>
+    );
 }
 
 export function MessageList({ messages, streamingContent, isStreaming, currentToolCall }: MessageListProps) {
@@ -49,10 +82,13 @@ export function MessageList({ messages, streamingContent, isStreaming, currentTo
                         <div className="message-avatar">
                             {message.role === 'user' ? '👤' : '🤖'}
                         </div>
-                        <div
-                            className="message-content"
-                            dangerouslySetInnerHTML={{ __html: escapeHtml(message.content) }}
-                        />
+                        <div className="message-content">
+                            {message.role === 'assistant' ? (
+                                <MarkdownContent content={message.content} />
+                            ) : (
+                                message.content
+                            )}
+                        </div>
                     </div>
                 ))}
 
@@ -67,8 +103,8 @@ export function MessageList({ messages, streamingContent, isStreaming, currentTo
                                     <span>Calling {formatToolName(currentToolCall)}...</span>
                                 </div>
                             )}
-                            {/* Streaming content */}
-                            {streamingContent || (!currentToolCall && '')}
+                            {/* Streaming content with markdown */}
+                            {streamingContent && <MarkdownContent content={streamingContent} />}
                         </div>
                         {!currentToolCall && <div className="streaming-cursor">▊</div>}
                     </div>
@@ -77,3 +113,4 @@ export function MessageList({ messages, streamingContent, isStreaming, currentTo
         </div>
     );
 }
+
