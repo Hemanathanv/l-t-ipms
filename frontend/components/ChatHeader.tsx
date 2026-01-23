@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, Sparkles, Check } from 'lucide-react';
+import { ChevronDown, Sparkles, Check, Menu } from 'lucide-react';
 import { useProjects } from '@/actions/useProjects';
 import { useSidebar } from '@/components/ui/sidebar';
 import Logout from '@/components/user/Logout';
@@ -35,7 +35,7 @@ export function ChatHeader({
     hideBorder = false,
 }: ChatHeaderProps) {
     const { data: projectsData, isLoading } = useProjects();
-    const { state } = useSidebar();
+    const { state, isMobile, toggleSidebar } = useSidebar();
     const isCollapsed = state === 'collapsed';
     const [selectedVersion, setSelectedVersion] = useState(versions[1]); // Default to standard
     const [isVersionDropdownOpen, setIsVersionDropdownOpen] = useState(false);
@@ -50,11 +50,22 @@ export function ChatHeader({
         <header
             className={`main-header ${hideBorder ? 'no-border' : ''}`}
             style={{
-                paddingLeft: isCollapsed ? 'calc(var(--sidebar-width-icon, 3rem) + 24px)' : '24px',
+                paddingLeft: isMobile ? '16px' : (isCollapsed ? 'calc(var(--sidebar-width-icon, 3rem) + 24px)' : '24px'),
                 transition: 'padding-left 300ms ease-in-out',
             }}
         >
             <div className="header-left">
+                {/* Mobile Menu Button - only visible on mobile */}
+                {isMobile && (
+                    <button
+                        className="mobile-menu-btn"
+                        onClick={toggleSidebar}
+                        aria-label="Open menu"
+                    >
+                        <Menu size={24} />
+                    </button>
+                )}
+
                 {/* Version Selector Dropdown - ChatGPT style */}
                 <div className="version-selector">
                     <button

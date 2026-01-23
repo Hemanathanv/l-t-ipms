@@ -956,12 +956,137 @@
     pointer-events: auto;
   }
 
-  .header-right {
-    flex-direction: column;
+  /* Mobile Menu Button */
+  .mobile-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-primary);
+    transition: background 0.2s ease;
+  }
+
+  .mobile-menu-btn:hover {
+    background: var(--bg-sidebar);
+  }
+
+  /* Header adjustments */
+  .main-header {
+    padding: 12px 16px;
+    flex-wrap: wrap;
     gap: 8px;
   }
 
+  .header-left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .header-right {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .project-selector {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .project-selector select {
+    min-width: unset;
+    width: 100%;
+    max-width: 150px;
+  }
+
+  .date-range {
+    display: none;
+  }
+
+  /* Version selector adjustments */
+  .version-button {
+    padding: 6px 10px;
+  }
+
+  .version-name {
+    font-size: 0.95rem;
+  }
+
+  .version-dropdown {
+    min-width: 250px;
+    left: 0;
+    right: auto;
+  }
+
+  /* Message adjustments */
   .message-content {
-    max-width: 85%;
+    max-width: 90%;
+    padding: 12px 14px;
+    font-size: 0.9rem;
+  }
+
+  .message-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 1rem;
+    margin: 0 8px;
+  }
+
+  /* Welcome container adjustments */
+  .welcome-container {
+    padding: 16px;
+  }
+
+  .welcome-content {
+    padding: 0 16px;
+  }
+
+  .welcome-heading {
+    font-size: 1.4rem;
+  }
+
+  /* Input adjustments */
+  .input-container {
+    padding: 12px 16px;
+  }
+
+  .input-wrapper {
+    padding: 10px 12px;
+  }
+
+  /* Chat container */
+  .chat-container {
+    padding: 12px;
+  }
+
+  .messages-wrapper {
+    max-width: 100%;
+    padding: 0;
+  }
+}
+
+/* Extra small screens */
+@media (max-width: 480px) {
+  .header-right {
+    justify-content: space-between;
+  }
+
+  .project-selector label {
+    display: none;
+  }
+
+  .version-dropdown {
+    min-width: 220px;
+  }
+
+  .message-content {
+    max-width: 95%;
   }
 }
