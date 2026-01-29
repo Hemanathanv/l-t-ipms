@@ -5,6 +5,7 @@ generator client {
   provider             = "prisma-client-py"
   interface            = "asyncio"
   recursive_type_depth = 5
+  output               = "../.venv/Lib/site-packages/prisma"
 }
 
 datasource db {
@@ -28,12 +29,24 @@ model Conversation {
 model Message {
   id             String       @id @default(uuid())
   conversationId String       @map("conversation_id")
-  role           String       // 'user', 'assistant', 'system'
+  role           String       // 'user', 'assistant', 'system', 'tool'
   content        String
+  // Token tracking
+  inputTokens    Int?         @map("input_tokens")
+  outputTokens   Int?         @map("output_tokens")
+  totalTokens    Int?         @map("total_tokens")
+  // Tool call tracking
+  toolCalls      Json?        @map("tool_calls")    // Array of {name, args, result}
+  toolName       String?      @map("tool_name")     // For tool result messages
+  // Model info
+  model          String?      // Model used for this response
+  // Flexible metadata JSON for additional info
+  metadata       Json?        // {latency_ms, finish_reason, etc.}
   createdAt      DateTime     @default(now()) @map("created_at")
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+  @@index([role])
   @@map("messages")
 }
 

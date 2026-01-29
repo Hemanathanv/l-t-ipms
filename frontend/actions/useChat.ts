@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { API_BASE } from '@/lib/api';
+import { getWsUrl } from '@/lib/api';
 import { Message, StreamEvent } from '@/lib/types';
 
 interface UseChatOptions {
@@ -22,8 +22,135 @@ export function useChat(options: UseChatOptions = {}) {
     const [threadId, setThreadId] = useState<string | null>(null);
     const [streamingContent, setStreamingContent] = useState('');
     const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
+    const [isConnected, setIsConnected] = useState(false);
     const queryClient = useQueryClient();
-    const abortControllerRef = useRef<AbortController | null>(null);
+    const wsRef = useRef<WebSocket | null>(null);
+    const accumulatedContentRef = useRef('');
+    const pendingMessageRef = useRef<{ content: string; projectId?: string } | null>(null);
+    const currentThreadIdRef = useRef<string | null>(null);
+
+    // Helper to send message on a WebSocket
+    const sendMessageInternal = useCallback((ws: WebSocket, content: string, projectId?: string) => {
+        // Add user message immediately
+        const userMessage: Message = { role: 'user', content };
+        setMessages(prev => [...prev, userMessage]);
+        setIsStreaming(true);
+        setStreamingContent('');
+        setCurrentToolCall(null);
+        accumulatedContentRef.current = '';
+        onStreamStart?.();
+
+        // Send message via WebSocket (thread_id is now in the URL path)
+        ws.send(JSON.stringify({
+            message: content,
+            project_id: projectId || null,
+        }));
+    }, [onStreamStart]);
+
+    // Connect to WebSocket with specific thread
+    const connect = useCallback((wsThreadId?: string | null) => {
+        // Close existing connection if connecting to a different thread
+        if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+        }
+
+        currentThreadIdRef.current = wsThreadId || null;
+        const wsUrl = getWsUrl(wsThreadId);
+        console.log('[WS] Connecting to:', wsUrl);
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            console.log('[WS] Connected');
+            setIsConnected(true);
+
+            // If there's a pending message, send it now
+            if (pendingMessageRef.current) {
+                const { content, projectId } = pendingMessageRef.current;
+                pendingMessageRef.current = null;
+                sendMessageInternal(ws, content, projectId);
+            }
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data: StreamEvent = JSON.parse(event.data);
+
+                switch (data.type) {
+                    case 'init':
+                        // Update threadId from server (especially for new chats)
+                        if (data.thread_id) {
+                            setThreadId(data.thread_id);
+                            currentThreadIdRef.current = data.thread_id;
+                        }
+                        break;
+                    case 'stream':
+                    case 'content':
+                        if (data.content) {
+                            accumulatedContentRef.current += data.content;
+                            // Filter think tags in real-time and display
+                            setStreamingContent(filterThinkTags(accumulatedContentRef.current));
+                        }
+                        break;
+                    case 'tool_call':
+                        // Show tool call indicator
+                        if (data.tool) {
+                            setCurrentToolCall(data.tool);
+                        }
+                        break;
+                    case 'tool_result':
+                        // Tool completed - clear tool call indicator
+                        setCurrentToolCall(null);
+                        break;
+                    case 'end':
+                        // Finalize the message
+                        const filteredContent = filterThinkTags(accumulatedContentRef.current);
+                        if (filteredContent) {
+                            const assistantMessage: Message = { role: 'assistant', content: filteredContent };
+                            setMessages(prev => [...prev, assistantMessage]);
+                            setStreamingContent('');
+                        }
+                        accumulatedContentRef.current = '';
+                        setCurrentToolCall(null);
+                        setIsStreaming(false);
+                        onStreamEnd?.();
+                        // Invalidate conversations list to refresh sidebar
+                        queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                        break;
+                    case 'error':
+                        console.error('WebSocket error:', data.error);
+                        setCurrentToolCall(null);
+                        setIsStreaming(false);
+                        onStreamEnd?.();
+                        break;
+                }
+            } catch (e) {
+                console.error('Failed to parse WebSocket message:', e);
+            }
+        };
+
+        ws.onclose = () => {
+            console.log('[WS] Disconnected');
+            setIsConnected(false);
+        };
+
+        ws.onerror = () => {
+            // WebSocket onerror events don't contain useful info
+            // The actual error handling happens in onclose
+            console.debug('[WS] Connection error - will retry on close');
+        };
+
+        wsRef.current = ws;
+    }, [queryClient, onStreamEnd, sendMessageInternal]);
+
+    // Connect on mount for new chat
+    useEffect(() => {
+        connect(null);
+        return () => {
+            wsRef.current?.close();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const loadConversation = useCallback((newMessages: Message[], newThreadId: string) => {
         // Filter think tags from loaded messages
@@ -35,129 +162,35 @@ export function useChat(options: UseChatOptions = {}) {
         setThreadId(newThreadId);
         setStreamingContent('');
         setCurrentToolCall(null);
-    }, []);
+
+        // Reconnect WebSocket to the loaded thread
+        connect(newThreadId);
+    }, [connect]);
 
     const startNewChat = useCallback(() => {
         setMessages([]);
         setThreadId(null);
         setStreamingContent('');
         setCurrentToolCall(null);
-    }, []);
 
-    const sendMessage = useCallback(async (content: string, projectId?: string) => {
-        // Add user message immediately
-        const userMessage: Message = { role: 'user', content };
-        setMessages(prev => [...prev, userMessage]);
-        setIsStreaming(true);
-        setStreamingContent('');
-        setCurrentToolCall(null);
-        onStreamStart?.();
+        // Connect to a new WebSocket for new chat
+        connect(null);
+    }, [connect]);
 
-        // Abort any existing request
-        abortControllerRef.current?.abort();
-        abortControllerRef.current = new AbortController();
-
-        try {
-            const response = await fetch(`${API_BASE}/chat/stream`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: content,
-                    thread_id: threadId,
-                    project_id: projectId || null,
-                }),
-                signal: abortControllerRef.current.signal,
-            });
-
-            if (!response.ok) throw new Error('Failed to start stream');
-
-            const reader = response.body?.getReader();
-            if (!reader) throw new Error('No response body');
-
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let accumulatedContent = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data: StreamEvent = JSON.parse(line.slice(6));
-
-                            switch (data.type) {
-                                case 'init':
-                                    if (data.thread_id && !threadId) {
-                                        setThreadId(data.thread_id);
-                                    }
-                                    break;
-                                case 'stream':
-                                case 'content':
-                                    if (data.content) {
-                                        accumulatedContent += data.content;
-                                        // Filter think tags in real-time and display
-                                        setStreamingContent(filterThinkTags(accumulatedContent));
-                                    }
-                                    break;
-                                case 'tool_call':
-                                    // Show tool call indicator
-                                    if (data.tool) {
-                                        setCurrentToolCall(data.tool);
-                                    }
-                                    break;
-                                case 'tool_result':
-                                    // Tool completed - clear tool call indicator
-                                    setCurrentToolCall(null);
-                                    break;
-                                case 'end':
-                                    // Finalize the message
-                                    const filteredContent = filterThinkTags(accumulatedContent);
-                                    if (filteredContent) {
-                                        const assistantMessage: Message = { role: 'assistant', content: filteredContent };
-                                        setMessages(prev => [...prev, assistantMessage]);
-                                        setStreamingContent('');
-                                    }
-                                    setCurrentToolCall(null);
-                                    break;
-                                case 'error':
-                                    console.error('Stream error:', data.error);
-                                    setCurrentToolCall(null);
-                                    break;
-                            }
-                        } catch (e) {
-                            console.error('Failed to parse SSE data:', e);
-                        }
-                    }
-                }
-            }
-
-            // Invalidate conversations list to refresh sidebar
-            queryClient.invalidateQueries({ queryKey: ['conversations'] });
-        } catch (error) {
-            if ((error as Error).name !== 'AbortError') {
-                console.error('Chat error:', error);
-                const errorMessage: Message = {
-                    role: 'assistant',
-                    content: `Error: ${(error as Error).message}`
-                };
-                setMessages(prev => [...prev, errorMessage]);
-            }
-        } finally {
-            setIsStreaming(false);
-            setStreamingContent('');
-            setCurrentToolCall(null);
-            onStreamEnd?.();
+    const sendMessage = useCallback((content: string, projectId?: string) => {
+        // If not connected, store message and connect
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            pendingMessageRef.current = { content, projectId };
+            connect(currentThreadIdRef.current);
+            return;
         }
-    }, [threadId, queryClient, onStreamStart, onStreamEnd]);
+
+        sendMessageInternal(wsRef.current, content, projectId);
+    }, [connect, sendMessageInternal]);
 
     const stopStreaming = useCallback(() => {
-        abortControllerRef.current?.abort();
+        // Close and reconnect to stop the current stream
+        wsRef.current?.close();
         setIsStreaming(false);
         setCurrentToolCall(null);
     }, []);
@@ -168,6 +201,7 @@ export function useChat(options: UseChatOptions = {}) {
         threadId,
         streamingContent,
         currentToolCall,
+        isConnected,
         sendMessage,
         loadConversation,
         startNewChat,

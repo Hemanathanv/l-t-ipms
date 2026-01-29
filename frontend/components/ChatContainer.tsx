@@ -7,6 +7,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { ChatHeader } from '@/components/ChatHeader';
 import { MessageList } from '@/components/MessageList';
 import { MessageInput } from '@/components/MessageInput';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { useChat } from '@/actions/useChat';
 import { useConversation } from '@/actions/useConversations';
 
@@ -31,7 +32,7 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
     } = useChat();
 
     // Load conversation if initialThreadId is provided
-    const { data: conversationData } = useConversation(initialThreadId || null);
+    const { data: conversationData, isLoading: isLoadingConversation } = useConversation(initialThreadId || null);
 
     useEffect(() => {
         if (initialThreadId && conversationData) {
@@ -98,7 +99,12 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
                     hideBorder={!hasMessages}
                 />
 
-                {hasMessages ? (
+                {isLoadingConversation && initialThreadId ? (
+                    // Loading state when fetching conversation history
+                    <div className="flex-1 flex items-center justify-center">
+                        <LoadingSpinner message="Loading conversation..." size="lg" />
+                    </div>
+                ) : hasMessages ? (
                     // Normal chat layout with messages at top, input at bottom
                     <>
                         <MessageList

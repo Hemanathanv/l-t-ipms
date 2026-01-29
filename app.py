@@ -5,7 +5,6 @@ FastAPI application with LangGraph agent, Redis caching, and PostgreSQL persiste
 
 import uuid
 import json
-import base64
 import asyncio
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -21,10 +20,9 @@ from pydantic import BaseModel, EmailStr
 
 from config import settings
 from db import get_prisma, close_prisma
-from cache import get_redis_cache
+from redis_client import get_redis_client, close_redis, get_cache, set_cache, append_message as cache_append_message, ping as redis_ping
 from agent import create_agent, create_checkpointer
 from agent.graph import run_conversation, get_conversation_history
-from agent.streaming import stream_conversation, subscribe_to_channel
 from auth.utils import hash_password, verify_password, create_session_token
 from auth.dependencies import get_current_user, get_optional_user, get_session_token
 from schemas import (
@@ -56,9 +54,10 @@ async def lifespan(app: FastAPI):
     prisma = await get_prisma()
     print("✅ PostgreSQL (Prisma) connected")
     
-    # Initialize Redis cache
-    cache = await get_redis_cache()
-    print("✅ Redis cache connected")
+    # Initialize Redis client
+    redis_client = await get_redis_client()
+    await redis_client.ping()
+    print("✅ Redis connected")
     
     # Initialize PostgreSQL checkpointer (async context manager)
     _checkpointer_cm = create_checkpointer()
@@ -79,8 +78,7 @@ async def lifespan(app: FastAPI):
     # Cleanup on shutdown
     print("🛑 Shutting down...")
     await close_prisma()
-    cache_instance = await get_redis_cache()
-    await cache_instance.close()
+    await close_redis()
     if _checkpointer_cm:
         await _checkpointer_cm.__aexit__(None, None, None)
     print("✅ All connections closed")
@@ -482,6 +480,7 @@ async def chat(request: ChatRequest):
 async def chat_stream(request: ChatRequest):
     """
     Stream a chat response using Server-Sent Events (SSE).
+    Uses direct LangGraph streaming with Redis caching.
     
     Returns a stream of events:
     - init: Thread ID
@@ -491,6 +490,7 @@ async def chat_stream(request: ChatRequest):
     - end: Stream finished
     """
     global _agent
+    from langchain_core.messages import HumanMessage
     
     if _agent is None:
         raise HTTPException(status_code=503, detail="Agent not initialized")
@@ -542,15 +542,20 @@ async def chat_stream(request: ChatRequest):
         enhanced_message = request.message
     
     async def event_generator():
-        """Generate SSE events directly from LangGraph astream_events."""
-        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        """Generate SSE events from LangGraph streaming."""
         
-        # Persist User Message
+        # Persist user message to DB
         try:
             await _persist_message_to_db(thread_id, "user", request.message)
         except Exception as e:
             print(f"Error persisting user message: {e}")
-
+        
+        # Cache user message
+        try:
+            await cache_append_message(thread_id, {"role": "user", "content": request.message})
+        except Exception:
+            pass  # Ignore cache errors
+        
         # Yield initial event with thread_id
         yield f"data: {json.dumps({'type': 'init', 'thread_id': thread_id})}\n\n"
         
@@ -561,20 +566,15 @@ async def chat_stream(request: ChatRequest):
         }
         
         seq = 0
-        streamed_content = ""  # Accumulate streamed chunks
-        final_sent = False  # Only send one final response
+        streamed_content = ""
+        final_sent = False
         
         try:
-            # Stream events directly from LangGraph
             async for event in _agent.astream_events(initial_state, version="v2", config=config):
                 event_type = event.get("event", "")
                 meta = event.get("metadata", {}) or {}
                 agent_name = meta.get("langgraph_node") or "agent"
                 
-                # Debug: print event type
-                print(f"[DEBUG] Event: {event_type}, Agent: {agent_name}")
-                
-                # Stream content chunks from LLM (when streaming=True on LLM)
                 if event_type == "on_chat_model_stream":
                     chunk = event.get("data", {}).get("chunk")
                     if chunk and hasattr(chunk, 'content') and chunk.content:
@@ -582,71 +582,49 @@ async def chat_stream(request: ChatRequest):
                         yield f"data: {json.dumps({'type': 'stream', 'content': chunk.content, 'agent': agent_name, 'seq': seq})}\n\n"
                         seq += 1
                 
-                # Chat model finished - only check for tool calls here
                 elif event_type == "on_chat_model_end":
                     output = event.get("data", {}).get("output")
                     if output and hasattr(output, "tool_calls") and output.tool_calls:
-                        print(f"[DEBUG] Tool calls: {output.tool_calls}")
                         for tool_call in output.tool_calls:
-                            if isinstance(tool_call, dict):
-                                tool_name = tool_call.get('name', 'unknown')
-                            else:
-                                tool_name = getattr(tool_call, 'name', 'unknown')
+                            tool_name = tool_call.get('name', 'unknown') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
                             yield f"data: {json.dumps({'type': 'tool_call', 'tool': tool_name, 'seq': seq})}\n\n"
                             seq += 1
                 
-                # Tool completed
                 elif event_type == "on_tool_end":
                     tool_name = event.get("name", "unknown")
                     yield f"data: {json.dumps({'type': 'tool_result', 'tool': tool_name, 'seq': seq})}\n\n"
                     seq += 1
                 
-                # Chain/node completed - get final content from chat node
                 elif event_type == "on_chain_end" and agent_name == "chat" and not final_sent:
                     out = event.get("data", {}).get("output")
-                    
-                    # Handle different output types
                     if out is None:
                         continue
                     
-                    msgs = []
-                    if isinstance(out, dict):
-                        msgs = out.get("messages") or []
-                    elif isinstance(out, list):
-                        msgs = out
-                    # If out is a string or other type, skip
+                    msgs = out.get("messages") if isinstance(out, dict) else out if isinstance(out, list) else []
                     
-                    # Find the final AI message with content
                     for m in reversed(msgs):
-                        content = getattr(m, "content", None) if hasattr(m, "content") else None
+                        content = getattr(m, "content", None)
                         has_tool_calls = hasattr(m, "tool_calls") and m.tool_calls
                         
-                        # Only use message if it has content and no tool calls
                         if content and not has_tool_calls:
-                            # Check if we already streamed this content
                             if content != streamed_content:
                                 final_sent = True
-                                
-                                # Persist AI Message (Final Answer)
                                 try:
                                     await _persist_message_to_db(thread_id, "assistant", content)
+                                    await cache_append_message(thread_id, {"role": "assistant", "content": content})
                                 except Exception as e:
                                     print(f"Error persisting AI message: {e}")
                                 
                                 yield f"data: {json.dumps({'type': 'stream', 'content': content, 'agent': agent_name, 'seq': seq})}\n\n"
                                 seq += 1
                             break
-
         
         except Exception as e:
             import traceback
-            print(f"[DEBUG] Exception: {e}")
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
         
-        # Signal end of stream
         yield f"data: {json.dumps({'type': 'end'})}\n\n"
-
     
     return StreamingResponse(
         event_generator(),
@@ -659,6 +637,7 @@ async def chat_stream(request: ChatRequest):
     )
 
 
+
 @app.get("/conversations/{thread_id}", response_model=ConversationHistory, tags=["Conversations"])
 async def get_conversation(thread_id: str):
     """
@@ -669,8 +648,7 @@ async def get_conversation(thread_id: str):
     global _agent
     
     # 1. Try cache first (fastest)
-    cache = await get_redis_cache()
-    cached_messages = await cache.get_conversation_cache(thread_id)
+    cached_messages = await get_cache(thread_id)
     
     if cached_messages:
         return ConversationHistory(
@@ -699,7 +677,7 @@ async def get_conversation(thread_id: str):
             ]
             
             # Cache for next time
-            await cache.set_conversation_cache(thread_id, messages)
+            await set_cache(thread_id, messages)
             
             return ConversationHistory(
                 thread_id=thread_id,
@@ -715,7 +693,7 @@ async def get_conversation(thread_id: str):
             history = await get_conversation_history(_agent, thread_id)
             if history:
                 # Cache for next time
-                await cache.set_conversation_cache(thread_id, history)
+                await set_cache(thread_id, history)
                 return ConversationHistory(
                     thread_id=thread_id,
                     messages=[MessageSchema(**m) for m in history],
@@ -732,8 +710,8 @@ async def delete_conversation(thread_id: str):
     Delete a conversation from cache and database.
     """
     # Clear from cache
-    cache = await get_redis_cache()
-    await cache.invalidate_cache(thread_id)
+    from redis_client import invalidate_cache
+    await invalidate_cache(thread_id)
     
     # Clear from Prisma
     try:
@@ -749,15 +727,75 @@ async def delete_conversation(thread_id: str):
     return {"status": "deleted", "thread_id": thread_id}
 
 
-async def _persist_message_to_db(thread_id: str, role: str, content: str):
+@app.post("/conversations/{thread_id}/preload", tags=["Conversations"])
+async def preload_conversation(thread_id: str):
     """
-    Persist a message to the Prisma database.
+    Pre-load conversation into Redis cache for faster subsequent access.
+    Called when user clicks on a conversation in the sidebar.
+    """
+    # Check if already cached
+    cached = await get_cache(thread_id)
+    if cached:
+        return {"status": "already_cached", "message_count": len(cached)}
+    
+    # Load from Prisma and cache
+    try:
+        prisma = await get_prisma()
+        conversation = await prisma.conversation.find_unique(
+            where={"threadId": thread_id},
+            include={"messages": True}
+        )
+        
+        if conversation and conversation.messages:
+            sorted_messages = sorted(conversation.messages, key=lambda m: m.createdAt or datetime.min)
+            messages = [
+                {
+                    "role": msg.role,
+                    "content": msg.content,
+                    "created_at": msg.createdAt.isoformat() if msg.createdAt else None
+                }
+                for msg in sorted_messages
+            ]
+            await set_cache(thread_id, messages)
+            return {"status": "cached", "message_count": len(messages)}
+    except Exception as e:
+        print(f"Preload error: {e}")
+        return {"status": "error", "error": str(e)}
+    
+    return {"status": "not_found"}
+
+
+async def _persist_message_to_db(
+    thread_id: str, 
+    role: str, 
+    content: str,
+    *,
+    input_tokens: int = None,
+    output_tokens: int = None,
+    total_tokens: int = None,
+    tool_calls: list = None,
+    tool_name: str = None,
+    model: str = None,
+    metadata: dict = None
+):
+    """
+    Persist a message to the Prisma database with optional metadata.
     Creates the conversation if it doesn't exist.
     
-    Note: The main conversation state is also stored by LangGraph's PostgreSQL 
-    checkpointer. This Prisma storage is for additional metadata and custom queries.
+    Args:
+        thread_id: The conversation thread ID
+        role: Message role ('user', 'assistant', 'system', 'tool')
+        content: Message content
+        input_tokens: Number of input/prompt tokens
+        output_tokens: Number of output/completion tokens
+        total_tokens: Total tokens used
+        tool_calls: List of tool calls [{name, args, result}]
+        tool_name: Name of tool (for tool result messages)
+        model: Model name used for this response
+        metadata: Additional metadata dict {latency_ms, finish_reason, etc.}
     """
     from datetime import datetime
+    import json as json_lib
     
     prisma = await get_prisma()
     
@@ -774,40 +812,67 @@ async def _persist_message_to_db(thread_id: str, role: str, content: str):
             }
         )
     else:
-        # Update the conversation's updated_at timestamp using Python datetime
+        # Update the conversation's updated_at timestamp
         await prisma.conversation.update(
             where={"id": conversation.id},
             data={"updatedAt": datetime.utcnow()}
         )
     
+    # Build message data
+    message_data = {
+        "conversationId": conversation.id,
+        "role": role,
+        "content": content,
+    }
+    
+    # Add optional fields if provided
+    if input_tokens is not None:
+        message_data["inputTokens"] = input_tokens
+    if output_tokens is not None:
+        message_data["outputTokens"] = output_tokens
+    if total_tokens is not None:
+        message_data["totalTokens"] = total_tokens
+    if tool_calls is not None:
+        message_data["toolCalls"] = json_lib.dumps(tool_calls) if isinstance(tool_calls, list) else tool_calls
+    if tool_name is not None:
+        message_data["toolName"] = tool_name
+    if model is not None:
+        message_data["model"] = model
+    if metadata is not None:
+        message_data["metadata"] = json_lib.dumps(metadata) if isinstance(metadata, dict) else metadata
+    
     # Create the message
-    await prisma.message.create(
-        data={
-            "conversationId": conversation.id,
-            "role": role,
-            "content": content,
-        }
-    )
+    await prisma.message.create(data=message_data)
 
 
-@app.websocket("/ws/chat")
-async def websocket_chat(websocket: WebSocket):
+@app.websocket("/ws/chat/{thread_id}")
+async def websocket_chat(websocket: WebSocket, thread_id: str):
     """
     WebSocket endpoint for real-time chat streaming.
+    Uses direct astream_events for reliable streaming.
+    Caches messages with 1-hour TTL.
     
-    Client sends: {"message": "...", "thread_id": "..." (optional), "project_id": "..." (optional)}
+    Path parameter: thread_id - use "new" for a new conversation, or an existing thread_id
+    Client sends: {"message": "...", "project_id": "..." (optional)}
     Server sends: StreamEvent JSON objects
     """
     global _agent
+    from langchain_core.messages import HumanMessage
+    
+    # Handle "new" as a special case to generate a new thread_id
+    if thread_id == "new":
+        thread_id = str(uuid.uuid4())
     
     await websocket.accept()
+    
+    # Send init event immediately with the thread_id
+    await websocket.send_json({"type": "init", "thread_id": thread_id})
     
     try:
         while True:
             # Receive message from client
             data = await websocket.receive_json()
             message = data.get("message", "")
-            thread_id = data.get("thread_id") or str(uuid.uuid4())
             project_id = data.get("project_id")
             
             if not message:
@@ -834,71 +899,254 @@ async def websocket_chat(websocket: WebSocket):
                             "project_id": project_id,
                             "project_name": project_data.projectName,
                             "date_range": f"{date_from} to {date_to}",
+                            "date_from": date_from,
+                            "date_to": date_to,
                         }
                 except Exception as e:
                     print(f"Error getting project context: {e}")
             
-            # Build enhanced message
-            enhanced_message = message
+            # Build enhanced message with project context
             if project_context:
-                enhanced_message += (
-                    f"\n\n[CONTEXT]\nSelected Project: {project_context.get('project_name', 'Unknown')} "
-                    f"({project_context.get('project_id', 'N/A')})\n"
-                    f"Available Date Range: {project_context.get('date_range', 'N/A')}\n[/CONTEXT]"
+                context_info = (
+                    f"\n\n[CONTEXT]\n"
+                    f"Selected Project: {project_context.get('project_name', 'Unknown')} ({project_context.get('project_id', 'N/A')})\n"
+                    f"Available Date Range: {project_context.get('date_range', 'N/A')}\n"
+                    f"When calling tools, use project_id='{project_context.get('project_id', '')}' to filter results.\n"
+                    f"[/CONTEXT]"
                 )
+                enhanced_message = message + context_info
+            else:
+                enhanced_message = message
             
-            # Persist user message
+            # Persist user message to DB
             try:
                 await _persist_message_to_db(thread_id, "user", message)
             except Exception as e:
                 print(f"Error persisting user message: {e}")
             
-            # Send init event
-            await websocket.send_json({"type": "init", "thread_id": thread_id})
+            try:
+                await cache_append_message(thread_id, {"role": "user", "content": message})
+            except Exception as e:
+                print(f"Error caching user message: {e}")
             
-            # Stream response
-            from langchain_core.messages import HumanMessage
+            # Stream directly from LangGraph
             config = {"configurable": {"thread_id": thread_id}}
-            initial_state = {"messages": [HumanMessage(content=enhanced_message)], "thread_id": thread_id}
+            initial_state = {
+                "messages": [HumanMessage(content=enhanced_message)],
+                "thread_id": thread_id
+            }
             
-            accumulated_content = ""
             seq = 0
+            streamed_content = ""
+            final_sent = False
+            assistant_message_saved = False
+            
+            # Track metadata for persistence
+            collected_tool_calls = []
+            usage_info = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            model_name = None
+            start_time = asyncio.get_event_loop().time()
             
             try:
                 async for event in _agent.astream_events(initial_state, version="v2", config=config):
                     event_type = event.get("event", "")
+                    meta = event.get("metadata", {}) or {}
+                    agent_name = meta.get("langgraph_node") or "agent"
                     
                     if event_type == "on_chat_model_stream":
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and hasattr(chunk, 'content') and chunk.content:
-                            accumulated_content += chunk.content
+                            streamed_content += chunk.content
                             await websocket.send_json({
                                 "type": "stream",
                                 "content": chunk.content,
+                                "agent": agent_name,
                                 "seq": seq
                             })
                             seq += 1
                     
                     elif event_type == "on_chat_model_end":
                         output = event.get("data", {}).get("output")
+                        
+                        # Debug: show actual values to diagnose token extraction
                         if output:
-                            if hasattr(output, "tool_calls") and output.tool_calls:
-                                for tool_call in output.tool_calls:
-                                    tool_name = tool_call.get('name', 'unknown') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
-                                    await websocket.send_json({"type": "tool_call", "tool": tool_name, "seq": seq})
-                                    seq += 1
-                            elif hasattr(output, 'content') and output.content:
-                                try:
-                                    await _persist_message_to_db(thread_id, "assistant", output.content)
-                                except Exception as e:
-                                    print(f"Error persisting AI message: {e}")
+                            print(f"[DEBUG] usage_metadata = {getattr(output, 'usage_metadata', None)}")
+                            print(f"[DEBUG] response_metadata = {getattr(output, 'response_metadata', None)}")
+                        
+                        # Extract usage info - check multiple sources for compatibility
+                        # Source 1: usage_metadata (OpenAI, Gemini, LM Studio)
+                        if output and hasattr(output, "usage_metadata") and output.usage_metadata:
+                            usage = output.usage_metadata
+                            # Handle both dict and object types
+                            if isinstance(usage, dict):
+                                usage_info["input_tokens"] += usage.get("input_tokens", 0) or 0
+                                usage_info["output_tokens"] += usage.get("output_tokens", 0) or 0
+                                usage_info["total_tokens"] += usage.get("total_tokens", 0) or 0
+                            else:
+                                usage_info["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+                                usage_info["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+                                usage_info["total_tokens"] += getattr(usage, "total_tokens", 0) or 0
+                            print(f"[DEBUG] Token usage: input={usage_info['input_tokens']}, output={usage_info['output_tokens']}, total={usage_info['total_tokens']}")
+                        
+                        # Extract response metadata
+                        if output and hasattr(output, "response_metadata") and output.response_metadata:
+                            resp_meta = output.response_metadata
+                            print(f"[DEBUG] Response metadata keys: {list(resp_meta.keys())}")
+                            
+                            # Extract model name
+                            if "model_name" in resp_meta:
+                                model_name = resp_meta["model_name"]
+                            elif "model" in resp_meta:
+                                model_name = resp_meta["model"]
+                            
+                            # Source 2: response_metadata.token_usage (LM Studio, some local LLMs)
+                            if "token_usage" in resp_meta and usage_info["total_tokens"] == 0:
+                                token_usage = resp_meta["token_usage"]
+                                if isinstance(token_usage, dict):
+                                    usage_info["input_tokens"] = token_usage.get("prompt_tokens", 0) or token_usage.get("input_tokens", 0) or 0
+                                    usage_info["output_tokens"] = token_usage.get("completion_tokens", 0) or token_usage.get("output_tokens", 0) or 0
+                                    usage_info["total_tokens"] = token_usage.get("total_tokens", 0) or (usage_info["input_tokens"] + usage_info["output_tokens"])
+                                    print(f"[DEBUG] Token usage (token_usage): input={usage_info['input_tokens']}, output={usage_info['output_tokens']}, total={usage_info['total_tokens']}")
+                            
+                            # Source 3: response_metadata.usage (some providers)
+                            if "usage" in resp_meta and usage_info["total_tokens"] == 0:
+                                usage = resp_meta["usage"]
+                                if isinstance(usage, dict):
+                                    usage_info["input_tokens"] = usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0) or 0
+                                    usage_info["output_tokens"] = usage.get("completion_tokens", 0) or usage.get("output_tokens", 0) or 0
+                                    usage_info["total_tokens"] = usage.get("total_tokens", 0) or (usage_info["input_tokens"] + usage_info["output_tokens"])
+                                    print(f"[DEBUG] Token usage (usage): input={usage_info['input_tokens']}, output={usage_info['output_tokens']}, total={usage_info['total_tokens']}")
+                        
+                        # Handle tool calls
+                        if output and hasattr(output, "tool_calls") and output.tool_calls:
+                            for tool_call in output.tool_calls:
+                                tool_name = tool_call.get('name', 'unknown') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
+                                tool_args = tool_call.get('args', {}) if isinstance(tool_call, dict) else getattr(tool_call, 'args', {})
+                                collected_tool_calls.append({
+                                    "name": tool_name,
+                                    "args": tool_args,
+                                    "result": None  # Will be filled by on_tool_end
+                                })
+                                await websocket.send_json({
+                                    "type": "tool_call",
+                                    "tool": tool_name,
+                                    "seq": seq
+                                })
+                                seq += 1
                     
                     elif event_type == "on_tool_end":
                         tool_name = event.get("name", "unknown")
-                        await websocket.send_json({"type": "tool_result", "tool": tool_name, "seq": seq})
+                        tool_output = event.get("data", {}).get("output", "")
+                        
+                        # Update the collected tool call with result
+                        for tc in collected_tool_calls:
+                            if tc["name"] == tool_name and tc["result"] is None:
+                                tc["result"] = str(tool_output)[:500]  # Truncate large results
+                                break
+                        
+                        await websocket.send_json({
+                            "type": "tool_result",
+                            "tool": tool_name,
+                            "seq": seq
+                        })
                         seq += 1
+                    
+                    elif event_type == "on_chain_end":
+                        # Debug: log all chain_end events
+                        print(f"[DEBUG] on_chain_end: agent={agent_name}, final_sent={final_sent}")
+                        
+                        if agent_name == "chat" and not final_sent:
+                            out = event.get("data", {}).get("output")
+                            if out is None:
+                                continue
+                            
+                            msgs = out.get("messages") if isinstance(out, dict) else out if isinstance(out, list) else []
+                            
+                            for m in reversed(msgs):
+                                content = getattr(m, "content", None)
+                                has_tool_calls = hasattr(m, "tool_calls") and m.tool_calls
+                                
+                                if content and not has_tool_calls:
+                                    final_sent = True
+                                    # Use the final message content (may be same as streamed)
+                                    final_content = content if content else streamed_content
+                                    
+                                    if final_content and not assistant_message_saved:
+                                        assistant_message_saved = True
+                                        latency_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
+                                        
+                                        try:
+                                            await _persist_message_to_db(
+                                                thread_id, 
+                                                "assistant", 
+                                                final_content,
+                                                input_tokens=usage_info["input_tokens"] or None,
+                                                output_tokens=usage_info["output_tokens"] or None,
+                                                total_tokens=usage_info["total_tokens"] or None,
+                                                tool_calls=collected_tool_calls if collected_tool_calls else None,
+                                                model=model_name,
+                                                metadata={"latency_ms": latency_ms}
+                                            )
+                                            # Cache with full metadata
+                                            cache_message = {
+                                                "role": "assistant",
+                                                "content": final_content,
+                                                "input_tokens": usage_info["input_tokens"] or None,
+                                                "output_tokens": usage_info["output_tokens"] or None,
+                                                "total_tokens": usage_info["total_tokens"] or None,
+                                                "tool_calls": collected_tool_calls if collected_tool_calls else None,
+                                                "model": model_name,
+                                                "latency_ms": latency_ms
+                                            }
+                                            await cache_append_message(thread_id, cache_message)
+                                            print(f"✅ Saved assistant message to DB for thread {thread_id[:8]}... (tokens: {usage_info['total_tokens']}, tools: {len(collected_tool_calls)})")
+                                        except Exception as e:
+                                            print(f"Error persisting AI message: {e}")
+                                    
+                                    # Only send if different from what we already streamed
+                                    if content != streamed_content:
+                                        await websocket.send_json({
+                                            "type": "stream",
+                                            "content": content,
+                                            "agent": agent_name,
+                                            "seq": seq
+                                        })
+                                        seq += 1
+                                    break
                 
+                # Fallback: If we streamed content but never got a final chain_end event
+                if streamed_content and not assistant_message_saved:
+                    latency_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
+                    try:
+                        await _persist_message_to_db(
+                            thread_id, 
+                            "assistant", 
+                            streamed_content,
+                            input_tokens=usage_info["input_tokens"] or None,
+                            output_tokens=usage_info["output_tokens"] or None,
+                            total_tokens=usage_info["total_tokens"] or None,
+                            tool_calls=collected_tool_calls if collected_tool_calls else None,
+                            model=model_name,
+                            metadata={"latency_ms": latency_ms}
+                        )
+                        cache_message = {
+                            "role": "assistant",
+                            "content": streamed_content,
+                            "input_tokens": usage_info["input_tokens"] or None,
+                            "output_tokens": usage_info["output_tokens"] or None,
+                            "total_tokens": usage_info["total_tokens"] or None,
+                            "tool_calls": collected_tool_calls if collected_tool_calls else None,
+                            "model": model_name,
+                            "latency_ms": latency_ms
+                        }
+                        await cache_append_message(thread_id, cache_message)
+                        print(f"✅ Saved streamed assistant message to DB for thread {thread_id[:8]}... (tokens: {usage_info['total_tokens']}, tools: {len(collected_tool_calls)})")
+                    except Exception as e:
+                        print(f"Error persisting streamed AI message: {e}")
+            
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 await websocket.send_json({"type": "error", "error": str(e)})
             
             # Send end event
@@ -908,6 +1156,7 @@ async def websocket_chat(websocket: WebSocket):
         print("WebSocket client disconnected")
     except Exception as e:
         print(f"WebSocket error: {e}")
+
 
 
 if __name__ == "__main__":

@@ -89,15 +89,17 @@ class RedisCache:
             True if cached successfully
         """
         if not self._client:
+            print(f"[CACHE] Client not connected, cannot cache thread {thread_id}")
             return False
         
         try:
             key = self._conversation_key(thread_id)
             ttl = ttl or settings.CACHE_TTL_SECONDS
             await self._client.setex(key, ttl, json.dumps(messages))
+            print(f"[CACHE] Cached {len(messages)} messages for thread {thread_id} with TTL {ttl}s")
             return True
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[CACHE] Error caching thread {thread_id}: {e}")
         return False
     
     async def invalidate_cache(self, thread_id: str) -> bool:
@@ -139,6 +141,7 @@ class RedisCache:
         """
         messages = await self.get_conversation_cache(thread_id) or []
         messages.append(message)
+        print(f"[CACHE] Appending message (role={message.get('role')}) to thread {thread_id}, total: {len(messages)}")
         return await self.set_conversation_cache(thread_id, messages)
 
 
