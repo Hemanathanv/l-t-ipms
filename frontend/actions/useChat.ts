@@ -21,6 +21,8 @@ export function useChat(options: UseChatOptions = {}) {
     const [isStreaming, setIsStreaming] = useState(false);
     const [threadId, setThreadId] = useState<string | null>(null);
     const [streamingContent, setStreamingContent] = useState('');
+    const [thinkingContent, setThinkingContent] = useState('');
+    const [isThinking, setIsThinking] = useState(false);
     const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const queryClient = useQueryClient();
@@ -35,6 +37,8 @@ export function useChat(options: UseChatOptions = {}) {
         const userMessage: Message = { role: 'user', content };
         setMessages(prev => [...prev, userMessage]);
         setIsStreaming(true);
+        setIsThinking(true);  // Start in thinking state
+        setThinkingContent('');
         setStreamingContent('');
         setCurrentToolCall(null);
         accumulatedContentRef.current = '';
@@ -84,35 +88,64 @@ export function useChat(options: UseChatOptions = {}) {
                             currentThreadIdRef.current = data.thread_id;
                         }
                         break;
+                    case 'thinking':
+                        // Show thinking indicator with content
+                        console.log(`[FE-THINKING] received, content_len=${data.content?.length || 0}`);
+                        setIsThinking(true);
+                        if (data.content) {
+                            setThinkingContent(prev => prev + data.content);  // Accumulate thinking content
+                        }
+                        break;
                     case 'stream':
                     case 'content':
+                        // Once we start streaming actual content, we're done thinking
+                        setIsThinking(false);
                         if (data.content) {
                             accumulatedContentRef.current += data.content;
-                            // Filter think tags in real-time and display
-                            setStreamingContent(filterThinkTags(accumulatedContentRef.current));
+                            console.log(`[FE-STREAM] seq=${data.seq}, accumulated_len=${accumulatedContentRef.current.length}`);
+                            // Display streaming content (no need to filter - backend handles it)
+                            setStreamingContent(accumulatedContentRef.current);
                         }
                         break;
                     case 'tool_call':
                         // Show tool call indicator
+                        // Reset accumulated content - backend will stream fresh response after tool
+                        accumulatedContentRef.current = '';
+                        setStreamingContent('');
+                        setIsThinking(false);
+                        setThinkingContent('');
                         if (data.tool) {
                             setCurrentToolCall(data.tool);
                         }
                         break;
                     case 'tool_result':
                         // Tool completed - clear tool call indicator
+                        // Ready for fresh streaming from follow-up LLM call
                         setCurrentToolCall(null);
+                        setIsThinking(true);  // LLM will think again after tool result
                         break;
                     case 'end':
                         // Finalize the message
-                        const filteredContent = filterThinkTags(accumulatedContentRef.current);
+                        const finalContent = accumulatedContentRef.current;
+                        const finalThinking = thinkingContent;  // Preserve thinking content
+                        console.log(`[FE-END] finalContent_len=${finalContent.length}, thinkingContent_len=${finalThinking.length}`);
+
+                        // Clear streaming state FIRST to prevent showing both streaming + final
+                        accumulatedContentRef.current = '';
+                        setStreamingContent('');
+                        // Don't clear thinkingContent - keep it for display
+                        setIsThinking(false);
+                        setCurrentToolCall(null);
+                        setIsStreaming(false);
+
+                        // Then add the finalized message
+                        const filteredContent = filterThinkTags(finalContent);
+                        console.log(`[FE-END] filteredContent_len=${filteredContent.length}, adding to messages`);
                         if (filteredContent) {
                             const assistantMessage: Message = { role: 'assistant', content: filteredContent };
                             setMessages(prev => [...prev, assistantMessage]);
-                            setStreamingContent('');
                         }
-                        accumulatedContentRef.current = '';
-                        setCurrentToolCall(null);
-                        setIsStreaming(false);
+
                         onStreamEnd?.();
                         // Invalidate conversations list to refresh sidebar
                         queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -195,14 +228,162 @@ export function useChat(options: UseChatOptions = {}) {
         setCurrentToolCall(null);
     }, []);
 
+    const submitFeedback = useCallback(async (messageId: string, feedback: 'positive' | 'negative', note?: string) => {
+        try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/messages/${messageId}/feedback`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ feedback, note }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to submit feedback');
+            }
+
+            // Optimistically update UI
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? { ...msg, feedback, feedbackNote: note }
+                    : msg
+            ));
+
+        } catch (error) {
+            console.error('Error submitting feedback:', error);
+            // Revert changes if needed or show toast
+        }
+    }, []);
+
+    const editMessage = useCallback(async (messageId: string, newContent: string) => {
+        try {
+            // Find the message index to truncate messages after it
+            setMessages(prev => {
+                const index = prev.findIndex(m => m.id === messageId);
+                if (index === -1) return prev;
+                // Keep messages up to including this one (content will be updated)
+                const newMessages = prev.slice(0, index + 1);
+                // Update content
+                newMessages[index] = { ...newMessages[index], content: newContent };
+                return newMessages;
+            });
+
+            setIsStreaming(true);
+            setIsThinking(true);
+            setThinkingContent('');
+            setStreamingContent('');
+            setCurrentToolCall(null);
+            accumulatedContentRef.current = '';
+            onStreamStart?.();
+
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/messages/${messageId}/edit`, {
+                method: 'PUT',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ content: newContent }),
+            });
+
+            if (!response.ok || !response.body) {
+                throw new Error('Failed to edit message');
+            }
+
+            // Valid stream, start reading SSE
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n\n');
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+
+                    try {
+                        const jsonStr = line.slice(6);
+                        if (!jsonStr) continue;
+
+                        const data: StreamEvent = JSON.parse(jsonStr);
+
+                        // Reuse switch logic - duplicated for now for simplicity
+                        // Ideally extract `handleStreamEvent` fn
+                        switch (data.type) {
+                            case 'thinking':
+                                console.log(`[FE-THINKING] received, content_len=${data.content?.length || 0}`);
+                                setIsThinking(true);
+                                if (data.content) {
+                                    setThinkingContent(prev => prev + data.content);
+                                }
+                                break;
+                            case 'stream':
+                            case 'content':
+                                setIsThinking(false);
+                                if (data.content) {
+                                    accumulatedContentRef.current += data.content;
+                                    setStreamingContent(accumulatedContentRef.current);
+                                }
+                                break;
+                            case 'tool_call':
+                                accumulatedContentRef.current = '';
+                                setStreamingContent('');
+                                setIsThinking(false);
+                                setThinkingContent('');
+                                if (data.tool) setCurrentToolCall(data.tool);
+                                break;
+                            case 'tool_result':
+                                setCurrentToolCall(null);
+                                setIsThinking(true);
+                                break;
+                            case 'end':
+                                const finalContent = accumulatedContentRef.current;
+                                accumulatedContentRef.current = '';
+                                setStreamingContent('');
+                                setIsThinking(false);
+                                setCurrentToolCall(null);
+                                setIsStreaming(false);
+
+                                const filteredContent = filterThinkTags(finalContent);
+                                if (filteredContent) {
+                                    const assistantMessage: Message = { role: 'assistant', content: filteredContent };
+                                    setMessages(prev => [...prev, assistantMessage]);
+                                }
+                                onStreamEnd?.();
+                                queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                                break;
+                            case 'error':
+                                console.error('SSE Error:', data.error);
+                                break;
+                        }
+                    } catch (e) {
+                        console.error('Error parsing SSE:', e);
+                    }
+                }
+            }
+
+        } catch (error) {
+            console.error('Error editing message:', error);
+            setIsStreaming(false);
+            onStreamEnd?.();
+        }
+    }, [queryClient, onStreamStart, onStreamEnd]);
+
     return {
         messages,
         isStreaming,
         threadId,
         streamingContent,
+        thinkingContent,
+        isThinking,
         currentToolCall,
         isConnected,
         sendMessage,
+        editMessage,
+        submitFeedback,
         loadConversation,
         startNewChat,
         stopStreaming,

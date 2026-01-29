@@ -25,8 +25,12 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
         isStreaming,
         threadId,
         streamingContent,
+        thinkingContent,
+        isThinking,
         currentToolCall,
         sendMessage,
+        editMessage,
+        submitFeedback,
         loadConversation,
         startNewChat,
     } = useChat();
@@ -111,7 +115,11 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
                             messages={messages}
                             streamingContent={streamingContent}
                             isStreaming={isStreaming}
+                            isThinking={isThinking}
+                            thinkingContent={thinkingContent}
                             currentToolCall={currentToolCall}
+                            onEditMessage={editMessage}
+                            onFeedback={submitFeedback}
                         />
                         <MessageInput
                             onSend={handleSendMessage}

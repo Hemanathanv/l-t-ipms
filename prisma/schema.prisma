@@ -40,6 +40,10 @@ model Message {
   toolName       String?      @map("tool_name")     // For tool result messages
   // Model info
   model          String?      // Model used for this response
+  // Feedback tracking
+  feedback       String?      // 'positive', 'negative', or null
+  feedbackNote   String?      @map("feedback_note")  // Optional user comment
+  editedFrom     String?      @map("edited_from")    // ID of original message if this is an edit
   // Flexible metadata JSON for additional info
   metadata       Json?        // {latency_ms, finish_reason, etc.}
   createdAt      DateTime     @default(now()) @map("created_at")

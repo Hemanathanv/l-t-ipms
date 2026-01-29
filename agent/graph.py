@@ -98,6 +98,8 @@ async def chat_node(state: AgentState) -> dict:
     Main chat node that processes user messages and generates responses.
     Uses LLM with tools bound.
     """
+    from .message_pruner import prune_messages, MAX_CONTEXT_TOKENS
+    
     llm = get_llm()
     
     # Bind tools to the LLM
@@ -112,6 +114,9 @@ async def chat_node(state: AgentState) -> dict:
     has_system = any(isinstance(m, SystemMessage) for m in messages)
     if not has_system:
         messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
+    
+    # Prune messages to fit within token budget
+    messages = prune_messages(messages, max_tokens=MAX_CONTEXT_TOKENS)
     
     # Call the LLM with tools
     # Use sync invoke in a thread to avoid async streaming issues

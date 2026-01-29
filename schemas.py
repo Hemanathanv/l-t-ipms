@@ -22,9 +22,11 @@ class ChatResponse(BaseModel):
 
 class MessageSchema(BaseModel):
     """Schema for individual message"""
+    id: str | None = Field(None, description="Message database ID")
     role: str = Field(..., description="Message role: 'user' or 'assistant'")
     content: str = Field(..., description="Message content")
     created_at: datetime | None = Field(None, description="Message timestamp")
+    feedback: str | None = Field(None, description="User feedback: 'positive' or 'negative'")
 
 
 class ConversationHistory(BaseModel):
@@ -40,3 +42,14 @@ class HealthResponse(BaseModel):
     redis: str = Field(..., description="Redis connection status")
     postgres: str = Field(..., description="PostgreSQL connection status")
     llm: str = Field(..., description="LLM endpoint status")
+
+
+class FeedbackRequest(BaseModel):
+    """Request model for message feedback"""
+    feedback: str = Field(..., description="Feedback type: 'positive' or 'negative'")
+    note: str | None = Field(None, description="Optional feedback note")
+
+
+class EditMessageRequest(BaseModel):
+    """Request model for editing a message"""
+    content: str = Field(..., min_length=1, description="New message content")

@@ -1,7 +1,11 @@
 export interface Message {
+    id?: string;
     role: 'user' | 'assistant';
     content: string;
     created_at?: string;
+    feedback?: 'positive' | 'negative' | null;
+    feedbackNote?: string;
+    editedFrom?: string;
 }
 
 export interface Conversation {
@@ -31,7 +35,7 @@ export interface ConversationHistory {
 
 // WebSocket stream events
 export interface StreamEvent {
-    type: 'init' | 'stream' | 'content' | 'tool_call' | 'tool_result' | 'final' | 'error' | 'end';
+    type: 'init' | 'stream' | 'content' | 'thinking' | 'tool_call' | 'tool_result' | 'final' | 'error' | 'end';
     thread_id?: string;
     content?: string;
     tool?: string;
