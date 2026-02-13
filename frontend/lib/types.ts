@@ -6,6 +6,10 @@ export interface Message {
     feedback?: 'positive' | 'negative' | null;
     feedbackNote?: string;
     editedFrom?: string;
+    // Branching fields for ChatGPT-style navigation
+    position_index?: number;
+    branch_index?: number;
+    total_branches?: number;
 }
 
 export interface Conversation {
@@ -42,6 +46,9 @@ export interface StreamEvent {
     error?: string;
     seq?: number;
     agent?: string;
+    // Message IDs sent with 'end' event for edit/feedback functionality
+    user_message_id?: string;
+    assistant_message_id?: string;
 }
 
 export interface ChatState {

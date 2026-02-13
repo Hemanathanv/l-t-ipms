@@ -27,6 +27,10 @@ class MessageSchema(BaseModel):
     content: str = Field(..., description="Message content")
     created_at: datetime | None = Field(None, description="Message timestamp")
     feedback: str | None = Field(None, description="User feedback: 'positive' or 'negative'")
+    # Branching fields for ChatGPT-style navigation
+    position_index: int | None = Field(None, description="Logical position in conversation")
+    branch_index: int | None = Field(None, description="Version number at this position (0 = original)")
+    total_branches: int | None = Field(None, description="Total versions at this position")
 
 
 class ConversationHistory(BaseModel):

@@ -10,14 +10,14 @@ const preloadedConversations = new Set<string>();
 
 // Fetch all conversations
 async function fetchConversations(): Promise<Conversation[]> {
-    const response = await fetch(`${API_BASE}/api/conversations`);
+    const response = await fetch(`${API_BASE}/conversations`);
     if (!response.ok) throw new Error('Failed to load conversations');
     return response.json();
 }
 
 // Fetch single conversation
 async function fetchConversation(threadId: string): Promise<ConversationHistory> {
-    const response = await fetch(`${API_BASE}/conversations/${threadId}`);
+    const response = await fetch(`${API_BASE}/conversations/${threadId}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to load conversation');
     return response.json();
 }
@@ -25,6 +25,7 @@ async function fetchConversation(threadId: string): Promise<ConversationHistory>
 // Delete conversation
 async function deleteConversationApi(threadId: string): Promise<void> {
     const response = await fetch(`${API_BASE}/conversations/${threadId}`, {
+        credentials: 'include',
         method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete conversation');
@@ -40,6 +41,7 @@ async function preloadConversation(threadId: string): Promise<void> {
 
     try {
         await fetch(`${API_BASE}/conversations/${threadId}/preload`, {
+            credentials: 'include',
             method: 'POST',
         });
     } catch (error) {

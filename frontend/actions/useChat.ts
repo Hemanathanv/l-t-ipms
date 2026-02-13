@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getWsUrl } from '@/lib/api';
+import { getWsUrl, API_BASE } from '@/lib/api';
 import { Message, StreamEvent } from '@/lib/types';
 
 interface UseChatOptions {
@@ -130,6 +130,11 @@ export function useChat(options: UseChatOptions = {}) {
                         const finalThinking = thinkingContent;  // Preserve thinking content
                         console.log(`[FE-END] finalContent_len=${finalContent.length}, thinkingContent_len=${finalThinking.length}`);
 
+                        // Extract message IDs from end event
+                        const userMessageId = data.user_message_id;
+                        const assistantMessageId = data.assistant_message_id;
+                        console.log(`[FE-END] user_message_id=${userMessageId}, assistant_message_id=${assistantMessageId}`);
+
                         // Clear streaming state FIRST to prevent showing both streaming + final
                         accumulatedContentRef.current = '';
                         setStreamingContent('');
@@ -138,13 +143,33 @@ export function useChat(options: UseChatOptions = {}) {
                         setCurrentToolCall(null);
                         setIsStreaming(false);
 
-                        // Then add the finalized message
+                        // Then add the finalized message with proper IDs
                         const filteredContent = filterThinkTags(finalContent);
                         console.log(`[FE-END] filteredContent_len=${filteredContent.length}, adding to messages`);
-                        if (filteredContent) {
-                            const assistantMessage: Message = { role: 'assistant', content: filteredContent };
-                            setMessages(prev => [...prev, assistantMessage]);
-                        }
+
+                        setMessages(prev => {
+                            const newMessages = [...prev];
+
+                            // Update the last user message with its ID (if available)
+                            if (userMessageId) {
+                                const lastUserIndex = newMessages.map(m => m.role).lastIndexOf('user');
+                                if (lastUserIndex !== -1 && !newMessages[lastUserIndex].id) {
+                                    newMessages[lastUserIndex] = { ...newMessages[lastUserIndex], id: userMessageId };
+                                }
+                            }
+
+                            // Add assistant message with its ID
+                            if (filteredContent) {
+                                const assistantMessage: Message = {
+                                    role: 'assistant',
+                                    content: filteredContent,
+                                    id: assistantMessageId || undefined
+                                };
+                                newMessages.push(assistantMessage);
+                            }
+
+                            return newMessages;
+                        });
 
                         onStreamEnd?.();
                         // Invalidate conversations list to refresh sidebar
@@ -230,7 +255,7 @@ export function useChat(options: UseChatOptions = {}) {
 
     const submitFeedback = useCallback(async (messageId: string, feedback: 'positive' | 'negative', note?: string) => {
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/messages/${messageId}/feedback`, {
+            const response = await fetch(`${API_BASE}/messages/${messageId}/feedback`, {
                 method: 'POST',
                 credentials: 'include',
                 headers: {
@@ -277,7 +302,7 @@ export function useChat(options: UseChatOptions = {}) {
             accumulatedContentRef.current = '';
             onStreamStart?.();
 
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/messages/${messageId}/edit`, {
+            const response = await fetch(`${API_BASE}/messages/${messageId}/edit`, {
                 method: 'PUT',
                 credentials: 'include',
                 headers: {
@@ -290,16 +315,26 @@ export function useChat(options: UseChatOptions = {}) {
                 throw new Error('Failed to edit message');
             }
 
-            // Valid stream, start reading SSE
+            // Valid stream, start reading SSE with buffering for partial chunks
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let buffer = '';  // Buffer for incomplete SSE events
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n\n');
+                // Append new chunk to buffer
+                buffer += decoder.decode(value, { stream: true });
+
+                // Process complete SSE events (separated by double newline)
+                const eventBoundary = buffer.lastIndexOf('\n\n');
+                if (eventBoundary === -1) continue; // No complete events yet
+
+                const completeData = buffer.slice(0, eventBoundary);
+                buffer = buffer.slice(eventBoundary + 2); // Keep incomplete part
+
+                const lines = completeData.split('\n\n');
 
                 for (const line of lines) {
                     if (!line.startsWith('data: ')) continue;
@@ -372,6 +407,44 @@ export function useChat(options: UseChatOptions = {}) {
         }
     }, [queryClient, onStreamStart, onStreamEnd]);
 
+    // Switch to a different branch (version) of a message
+    const switchBranch = useCallback(async (messageId: string, branchIndex: number) => {
+        if (!threadId) return;
+
+        try {
+            const response = await fetch(
+                `${API_BASE}/messages/${messageId}/switch-branch/${branchIndex}`,
+                {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                }
+            );
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Failed to switch branch');
+            }
+
+            // Reload conversation to get the updated branch
+            const convResponse = await fetch(
+                `${API_BASE}/conversations/${threadId}`,
+                { credentials: 'include' }
+            );
+
+            if (convResponse.ok) {
+                const data = await convResponse.json();
+                setMessages(data.messages || []);
+            }
+
+            // Invalidate cache
+            queryClient.invalidateQueries({ queryKey: ['conversations'] });
+
+        } catch (error) {
+            console.error('Error switching branch:', error);
+        }
+    }, [threadId, queryClient]);
+
     return {
         messages,
         isStreaming,
@@ -388,5 +461,6 @@ export function useChat(options: UseChatOptions = {}) {
         startNewChat,
         stopStreaming,
         setThreadId,
+        switchBranch,
     };
 }

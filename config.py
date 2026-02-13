@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str 
     GEMINI_API_KEY: str
     OPENAI_API_KEY: str
+    API_SLUG: str = "/api/v1"
     
     # Cache settings
     CACHE_TTL_SECONDS: int = 3600  # 1 hour default TTL for cached messages

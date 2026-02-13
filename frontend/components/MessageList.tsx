@@ -14,6 +14,7 @@ interface MessageListProps {
     currentToolCall?: string | null;
     onEditMessage?: (id: string, newContent: string) => void;
     onFeedback?: (id: string, feedback: 'positive' | 'negative') => void;
+    onSwitchBranch?: (messageId: string, branchIndex: number) => void;
 }
 
 // Format tool name for display (e.g., sra_status_pei -> SRA Status PEI)
@@ -124,7 +125,8 @@ export function MessageList({
     thinkingContent = '',
     currentToolCall,
     onEditMessage,
-    onFeedback
+    onFeedback,
+    onSwitchBranch
 }: MessageListProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [editingId, setEditingId] = useState<string | null>(null);

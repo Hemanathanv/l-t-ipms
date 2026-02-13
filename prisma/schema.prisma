@@ -44,6 +44,10 @@ model Message {
   feedback       String?      // 'positive', 'negative', or null
   feedbackNote   String?      @map("feedback_note")  // Optional user comment
   editedFrom     String?      @map("edited_from")    // ID of original message if this is an edit
+  // Branching/versioning fields for ChatGPT-style navigation
+  positionIndex  Int?         @map("position_index")   // Logical position in conversation (0, 1, 2...)
+  branchIndex    Int          @default(0) @map("branch_index")  // Version at this position (0 = original, 1 = first edit)
+  activeBranch   Boolean      @default(true) @map("active_branch")  // Is this the currently visible version?
   // Flexible metadata JSON for additional info
   metadata       Json?        // {latency_ms, finish_reason, etc.}
   createdAt      DateTime     @default(now()) @map("created_at")
@@ -51,6 +55,7 @@ model Message {
 
   @@index([conversationId])
   @@index([role])
+  @@index([conversationId, positionIndex, activeBranch])
   @@map("messages")
 }
 
