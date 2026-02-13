@@ -1,11 +1,7 @@
-// Prisma Schema for L&T IPMS Conversational App
-// This schema defines models for storing conversation history
-
 generator client {
   provider             = "prisma-client-py"
+  recursive_type_depth = "5"
   interface            = "asyncio"
-  recursive_type_depth = 5
-  output               = "../.venv/Lib/site-packages/prisma"
 }
 
 datasource db {
@@ -13,7 +9,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Conversation model - represents a chat thread
 model Conversation {
   id        String    @id @default(uuid())
   threadId  String    @unique @map("thread_id")
@@ -25,27 +20,21 @@ model Conversation {
   @@map("conversations")
 }
 
-// Message model - individual messages in a conversation
 model Message {
   id             String       @id @default(uuid())
   conversationId String       @map("conversation_id")
-  role           String       // 'user', 'assistant', 'system', 'tool'
+  role           String
   content        String
-  // Token tracking
   inputTokens    Int?         @map("input_tokens")
   outputTokens   Int?         @map("output_tokens")
   totalTokens    Int?         @map("total_tokens")
-  // Tool call tracking
-  toolCalls      Json?        @map("tool_calls")    // Array of {name, args, result}
-  toolName       String?      @map("tool_name")     // For tool result messages
-  // Model info
-  model          String?      // Model used for this response
-  // Feedback tracking
-  feedback       String?      // 'positive', 'negative', or null
-  feedbackNote   String?      @map("feedback_note")  // Optional user comment
-  editedFrom     String?      @map("edited_from")    // ID of original message if this is an edit
-  // Flexible metadata JSON for additional info
-  metadata       Json?        // {latency_ms, finish_reason, etc.}
+  toolCalls      Json?        @map("tool_calls")
+  toolName       String?      @map("tool_name")
+  model          String?
+  feedback       String?
+  feedbackNote   String?      @map("feedback_note")
+  editedFrom     String?      @map("edited_from")
+  metadata       Json?
   createdAt      DateTime     @default(now()) @map("created_at")
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
@@ -54,7 +43,6 @@ model Message {
   @@map("messages")
 }
 
-// SRA Dataset - Project performance metrics
 model SraTable {
   id                          Int      @id @default(autoincrement())
   projectId                   String   @map("project_id")
@@ -90,68 +78,107 @@ model SraTable {
   @@map("sratable")
 }
 
-// User model - stores user credentials and profile
 model User {
-  id            String    @id @default(uuid())
-  name          String
-  email         String    @unique
-  passwordHash  String    @map("password_hash")
-  systemRole    String    @default("USER") @map("system_role")
-  isActive      Boolean   @default(true) @map("is_active")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  
-  sessions      Session[]
-  
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  systemRole   String    @default("USER") @map("system_role")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  sessions     Session[]
+
   @@map("users")
 }
 
-// Session model - stores active user sessions
 model Session {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   token     String   @unique
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
-  
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([token])
   @@map("sessions")
 }
 
-// SRA Activity-Level Dataset - Activity performance metrics with PEI
 model SraActivityTable {
-  id                       Int      @id @default(autoincrement())
-  date                     DateTime
-  projectId                String   @map("project_id")
-  projectName              String   @map("project_name")
-  activityId               String   @map("activity_id")
-  activityName             String   @map("activity_name")
-  isCriticalFlag           Int      @map("is_critical_flag")
-  plannedFinishDate        DateTime @map("planned_finish_date")
-  forecastFinishDate       DateTime @map("forecast_finish_date")
-  plannedStartDate         DateTime @map("planned_start_date")
+  id                        Int      @id @default(autoincrement())
+  date                      DateTime
+  projectId                 String   @map("project_id")
+  projectName               String   @map("project_name")
+  activityId                String   @map("activity_id")
+  activityName              String   @map("activity_name")
+  isCriticalFlag            Int      @map("is_critical_flag")
+  plannedFinishDate         DateTime @map("planned_finish_date")
+  forecastFinishDate        DateTime @map("forecast_finish_date")
+  plannedStartDate          DateTime @map("planned_start_date")
   plannedFinishActivityDate DateTime @map("planned_finish_activity_date")
-  plannedValueAmount       Float    @map("planned_value_amount")
-  earnedValueAmount        Float    @map("earned_value_amount")
-  totalScopeQty            Float    @map("total_scope_qty")
-  rowAvailableQty          Float    @map("row_available_qty")
-  executedQty              Float    @map("executed_qty")
-  totalFloatDays           Float    @map("total_float_days")
-  cpiValue                 Float    @map("cpi_value")
-  billingReadinessPct      Float    @map("billing_readiness_pct")
-  riskProfile              Float    @map("risk_profile")
-  spiValue                 Float    @map("spi_value")
-  peiValue                 Float    @map("pei_value")
-  forecastDelayDays        Int      @map("forecast_delay_days")
-  workfrontReadinessPct    Float    @map("workfront_readiness_pct")
-  avgFloat                 Float    @map("avg_float")
-  createdAt                DateTime @default(now()) @map("created_at")
+  plannedValueAmount        Float    @map("planned_value_amount")
+  earnedValueAmount         Float    @map("earned_value_amount")
+  totalScopeQty             Float    @map("total_scope_qty")
+  rowAvailableQty           Float    @map("row_available_qty")
+  executedQty               Float    @map("executed_qty")
+  totalFloatDays            Float    @map("total_float_days")
+  cpiValue                  Float    @map("cpi_value")
+  billingReadinessPct       Float    @map("billing_readiness_pct")
+  riskProfile               Float    @map("risk_profile")
+  spiValue                  Float    @map("spi_value")
+  peiValue                  Float    @map("pei_value")
+  forecastDelayDays         Int      @map("forecast_delay_days")
+  workfrontReadinessPct     Float    @map("workfront_readiness_pct")
+  avgFloat                  Float    @map("avg_float")
+  createdAt                 DateTime @default(now()) @map("created_at")
 
   @@index([projectId])
   @@index([activityId])
   @@index([date])
   @@map("sra_activity_table")
+}
+
+model checkpoint_blobs {
+  thread_id     String
+  checkpoint_ns String @default("")
+  channel       String
+  version       String
+  type          String
+  blob          Bytes?
+
+  @@id([thread_id, checkpoint_ns, channel, version])
+  @@index([thread_id])
+}
+
+model checkpoint_migrations {
+  v Int @id
+}
+
+model checkpoint_writes {
+  thread_id     String
+  checkpoint_ns String  @default("")
+  checkpoint_id String
+  task_id       String
+  idx           Int
+  channel       String
+  type          String?
+  blob          Bytes
+  task_path     String  @default("")
+
+  @@id([thread_id, checkpoint_ns, checkpoint_id, task_id, idx])
+  @@index([thread_id])
+}
+
+model checkpoints {
+  thread_id            String
+  checkpoint_ns        String  @default("")
+  checkpoint_id        String
+  parent_checkpoint_id String?
+  type                 String?
+  checkpoint           Json
+  metadata             Json    @default("{}")
+
+  @@id([thread_id, checkpoint_ns, checkpoint_id])
+  @@index([thread_id])
 }

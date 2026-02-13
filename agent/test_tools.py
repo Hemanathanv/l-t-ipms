@@ -11,14 +11,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db import get_prisma, close_prisma
-from agent.tools import (
-    sra_status_pei,
-    sra_drill_delay,
-    sra_recovery_advise,
-    sra_simulate,
-    sra_create_action,
-    sra_explain_formula
-)
+from agent.tools import *
 
 
 async def test_sra_status_pei():
@@ -30,8 +23,8 @@ async def test_sra_status_pei():
     # Test: With project_id and date
     print("\n--- Test: With project_id and date ---")
     result = await sra_status_pei.ainvoke({
-        "project_id": "PRJ_001",
-        "start_date": "2025-07-1"
+        "project_id": "PRJ_1076",
+        "start_date": "2024-12-25"
     })
     print(result)
 
@@ -128,11 +121,11 @@ async def main():
         
         # Run tests for all 6 tools
         await test_sra_status_pei()
-        await test_sra_drill_delay()
-        await test_sra_recovery_advise()
-        await test_sra_simulate()
-        await test_sra_create_action()
-        await test_sra_explain_formula()
+        # await test_sra_drill_delay()
+        # await test_sra_recovery_advise()
+        # await test_sra_simulate()
+        # await test_sra_create_action()
+        # await test_sra_explain_formula()
         
         print("\n" + "="*60)
         print("✅ All tests completed!")

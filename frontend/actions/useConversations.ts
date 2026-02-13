@@ -2,35 +2,51 @@
 
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { API_BASE } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 import { Conversation, ConversationHistory } from '@/lib/types';
 
 // Track preloaded conversations to avoid duplicate calls
 const preloadedConversations = new Set<string>();
 
-// Fetch all conversations
+/**
+ * Fetch all conversations with automatic token authentication
+ * Token is automatically included in Authorization header
+ */
 async function fetchConversations(): Promise<Conversation[]> {
-    const response = await fetch(`${API_BASE}/api/conversations`);
-    if (!response.ok) throw new Error('Failed to load conversations');
+    const response = await apiFetch('/conversations');
+    if (!response.ok) {
+        throw new Error(`Failed to load conversations: ${response.statusText}`);
+    }
     return response.json();
 }
 
-// Fetch single conversation
+/**
+ * Fetch single conversation with automatic token authentication
+ */
 async function fetchConversation(threadId: string): Promise<ConversationHistory> {
-    const response = await fetch(`${API_BASE}/conversations/${threadId}`);
-    if (!response.ok) throw new Error('Failed to load conversation');
+    const response = await apiFetch(`/conversations/${threadId}`);
+    if (!response.ok) {
+        throw new Error(`Failed to load conversation: ${response.statusText}`);
+    }
     return response.json();
 }
 
-// Delete conversation
+/**
+ * Delete conversation with automatic token authentication
+ */
 async function deleteConversationApi(threadId: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/conversations/${threadId}`, {
+    const response = await apiFetch(`/conversations/${threadId}`, {
         method: 'DELETE',
     });
-    if (!response.ok) throw new Error('Failed to delete conversation');
+    if (!response.ok) {
+        throw new Error(`Failed to delete conversation: ${response.statusText}`);
+    }
 }
 
-// Pre-warm cache when conversation is about to be loaded
+/**
+ * Pre-warm cache when conversation is about to be loaded
+ * Includes token automatically
+ */
 async function preloadConversation(threadId: string): Promise<void> {
     // Skip if already preloaded
     if (preloadedConversations.has(threadId)) {
@@ -39,7 +55,7 @@ async function preloadConversation(threadId: string): Promise<void> {
     preloadedConversations.add(threadId);
 
     try {
-        await fetch(`${API_BASE}/conversations/${threadId}/preload`, {
+        await apiFetch(`/conversations/${threadId}/preload`, {
             method: 'POST',
         });
     } catch (error) {

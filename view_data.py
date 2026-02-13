@@ -93,14 +93,15 @@ async def view_checkpoint_tables():
     await prisma.connect()
     
     try:
-        # Query checkpoint count
-        result = await prisma.execute_raw(
+        # Query checkpoint count using query_raw (checkpoints table may not be in Prisma schema)
+        # This is a special case for LangGraph checkpointer tables
+        result = await prisma.query_raw(
             "SELECT COUNT(*) as count FROM checkpoints"
         )
         print(f"\n📦 Checkpoints count: {result}")
         
         # Get sample checkpoint info
-        threads = await prisma.execute_raw(
+        threads = await prisma.query_raw(
             "SELECT DISTINCT thread_id FROM checkpoints LIMIT 10"
         )
         print(f"📋 Thread IDs in checkpoints: {threads}")

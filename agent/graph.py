@@ -1,15 +1,9 @@
-"""
-LangGraph Conversational Agent with Tools
-Defines the conversation graph with state management, tools, and PostgreSQL checkpointing
-"""
-
 from typing import Annotated, TypedDict, Sequence, Literal
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.prebuilt import ToolNode
-
 from config import settings
 from .llm import get_llm
 from .tools import SRA_TOOLS

@@ -25,21 +25,41 @@ export interface AuthResult {
     };
 }
 
-// Store token in memory for API calls
+// Store token in memory and persistent storage
 let authToken: string | null = null;
+
+/**
+ * Initialize auth from persistent storage
+ */
+function initializeAuthToken(): void {
+    if (typeof window === 'undefined') return;
+    authToken = sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token');
+}
 
 /**
  * Get stored auth token
  */
 export function getAuthToken(): string | null {
+    if (!authToken && typeof window !== 'undefined') {
+        initializeAuthToken();
+    }
     return authToken;
 }
 
 /**
- * Set auth token
+ * Set auth token in memory and persistent storage
  */
 export function setAuthToken(token: string | null): void {
     authToken = token;
+    if (typeof window !== 'undefined') {
+        if (token) {
+            sessionStorage.setItem('auth_token', token);
+            localStorage.setItem('auth_token', token);
+        } else {
+            sessionStorage.removeItem('auth_token');
+            localStorage.removeItem('auth_token');
+        }
+    }
 }
 
 /**
@@ -104,7 +124,7 @@ export async function signOut(): Promise<{ error?: { message: string } }> {
             headers['Authorization'] = `Bearer ${authToken}`;
         }
 
-        await fetch(`${API_BASE}/auth/logout`, {
+        await fetch(`${API_BASE}auth/logout`, {
             method: 'POST',
             headers,
             credentials: 'include',
@@ -134,7 +154,7 @@ export async function getSession(): Promise<{ user: User | null }> {
             headers['Authorization'] = `Bearer ${authToken}`;
         }
 
-        const response = await fetch(`${API_BASE}/auth/session`, {
+        const response = await fetch(`${API_BASE}auth/session`, {
             method: 'GET',
             headers,
             credentials: 'include',
@@ -176,7 +196,7 @@ export const authClient = {
                 headers['Authorization'] = `Bearer ${authToken}`;
             }
 
-            const response = await fetch(`${API_BASE}/auth/change-password`, {
+            const response = await fetch(`${API_BASE}auth/change-password`, {
                 method: 'POST',
                 headers,
                 credentials: 'include',

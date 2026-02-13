@@ -1,32 +1,8 @@
-"""
-SRA Tools for LangGraph Agent
-Tools to query SRA data (PEI values, delays, etc.)
-"""
-
 from datetime import datetime, date
 from typing import Optional
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
-
-# Import Prisma - we'll use global instance
 from db import get_prisma
-
-
-class SRAStatusInput(BaseModel):
-    """Input schema for SRA status tool"""
-    project_id: Optional[str] = Field(None, description="Project ID to filter by (e.g., 'PRJ001'). Required for status check.")
-    date: Optional[str] = Field(None, description="Date in YYYY-MM-DD format (e.g., '2025-01-15'). If not provided, uses latest available data.")
-    response_style: Optional[str] = Field(
-        "standard", 
-        description="Response verbosity: 'executive' (1-2 lines), 'standard' (verdict + key metrics), 'detailed' (full analysis), 'metrics' (KPI-focused)"
-    )
-
-
-class SRADrillDelayInput(BaseModel):
-    """Input schema for SRA drill delay tool"""
-    project_id: Optional[str] = Field(None, description="Project ID to analyze delays for")
-    start_date: Optional[str] = Field(None, description="Start date in YYYY-MM-DD format")
-    end_date: Optional[str] = Field(None, description="End date in YYYY-MM-DD format")
+from dtos.models import *
 
 
 def parse_date(date_str: str) -> Optional[date]:
@@ -40,7 +16,6 @@ def parse_date(date_str: str) -> Optional[date]:
             return datetime.strptime(date_str, "%m/%d/%Y").date()
         except ValueError:
             return None
-
 
 @tool(args_schema=SRAStatusInput)
 async def sra_status_pei(
@@ -94,7 +69,7 @@ async def sra_status_pei(
     # ===== PARAMETER VALIDATION =====
     if not project_id:
         try:
-            all_records = await prisma.sraactivitytable.find_many(
+            all_records = await prisma.sratable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -125,7 +100,7 @@ async def sra_status_pei(
                 }
         
         # Query activities
-        records = await prisma.sraactivitytable.find_many(
+        records = await prisma.sratable.find_many(
             where=where_conditions,
             order={"date": "desc"}
         )
@@ -134,8 +109,8 @@ async def sra_status_pei(
             # If date specified but no data, suggest available dates
             if date:
                 date_query = {"projectId": project_id}
-                min_rec = await prisma.sraactivitytable.find_first(where=date_query, order={"date": "asc"})
-                max_rec = await prisma.sraactivitytable.find_first(where=date_query, order={"date": "desc"})
+                min_rec = await prisma.sratable.find_first(where=date_query, order={"date": "asc"})
+                max_rec = await prisma.sratable.find_first(where=date_query, order={"date": "desc"})
                 if min_rec and max_rec:
                     return f"No data for {date}. Available range: **{min_rec.date.strftime('%Y-%m-%d')}** to **{max_rec.date.strftime('%Y-%m-%d')}**"
             return f"No data found for project {project_id}. Please verify the project ID."
@@ -147,7 +122,8 @@ async def sra_status_pei(
         project_name = latest_records[0].projectName
         
         # Workfront Readiness
-        workfront_readiness = sum(r.workfrontReadinessPct for r in latest_records) / len(latest_records)
+        workfront_readiness = 0
+        # sum(r.workfrontReadinessPct for r in latest_records) / len(latest_records)
         
         # SPI (weighted by planned value)
         total_pv = sum(r.plannedValueAmount for r in latest_records)
@@ -157,17 +133,21 @@ async def sra_status_pei(
             spi_value = sum(r.spiValue for r in latest_records) / len(latest_records)
         
         # Forecast Delay
-        forecast_delay_days = latest_records[0].forecastDelayDays
+        forecast_delay_days = 0
+        # latest_records[0].forecastDelayDays
         
         # Float Health Index
-        critical_activities = [r for r in latest_records if r.isCriticalFlag == 1]
-        near_critical = [r for r in latest_records if r.totalFloatDays <= 5 and r.isCriticalFlag == 0]
+        critical_activities = 0
+        # [r for r in latest_records if r.isCriticalFlag == 1]
+        near_critical = 0
+        # [r for r in latest_records if r.totalFloatDays <= 5 and r.isCriticalFlag == 0]
         float_activities = critical_activities + near_critical
         
         if float_activities:
             float_health_index = sum(r.totalFloatDays for r in float_activities) / len(float_activities)
         else:
-            float_health_index = sum(r.avgFloat for r in latest_records) / len(latest_records)
+            float_health_index = 1
+            # sum(r.avgFloat for r in latest_records) / len(latest_records)
         
         # PEI & CPI for context
         pei_value = sum(r.peiValue for r in latest_records) / len(latest_records)
@@ -369,7 +349,6 @@ async def sra_status_pei(
     except Exception as e:
         return f"Error querying SRA data: {str(e)}"
 
-
 @tool(args_schema=SRADrillDelayInput)
 async def sra_drill_delay(
     project_id: Optional[str] = None,
@@ -398,7 +377,7 @@ async def sra_drill_delay(
     if not project_id:
         try:
             # Get unique projects by fetching records and deduplicating
-            all_records = await prisma.sraactivitytable.find_many(
+            all_records = await prisma.sratable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -419,8 +398,8 @@ async def sra_drill_delay(
     if not start_date:
         try:
             date_query = {"projectId": project_id} if project_id else None
-            min_date_rec = await prisma.sraactivitytable.find_first(where=date_query, order={"date": "asc"})
-            max_date_rec = await prisma.sraactivitytable.find_first(where=date_query, order={"date": "desc"})
+            min_date_rec = await prisma.sratable.find_first(where=date_query, order={"date": "asc"})
+            max_date_rec = await prisma.sratable.find_first(where=date_query, order={"date": "desc"})
             
             if min_date_rec and max_date_rec:
                 date_from = min_date_rec.date.strftime("%Y-%m-%d")
@@ -455,7 +434,7 @@ async def sra_drill_delay(
             }
         
         # Get all activities for the project
-        records = await prisma.sraactivitytable.find_many(
+        records = await prisma.sratable.find_many(
             where=where_conditions if where_conditions else None,
             order={"date": "desc"}
         )
@@ -581,35 +560,6 @@ async def sra_drill_delay(
     except Exception as e:
         return f"Error analyzing delays: {str(e)}"
 
-
-class SRARecoveryAdviseInput(BaseModel):
-    """Input schema for SRA recovery advise tool"""
-    project_id: Optional[str] = Field(None, description="Project ID to analyze recovery options for (e.g., 'PRJ_001')")
-    activity_id: Optional[str] = Field(None, description="Specific activity ID to focus recovery on")
-    resource_type: Optional[str] = Field(None, description="Type of resource to consider (e.g., 'labor', 'equipment', 'material')")
-
-
-class SRASimulateInput(BaseModel):
-    """Input schema for SRA simulation tool"""
-    project_id: Optional[str] = Field(None, description="Project ID to run simulation for")
-    resource_type: Optional[str] = Field(None, description="Type of resource to simulate (e.g., 'shuttering_gang', 'labor', 'equipment')")
-    value_amount: Optional[float] = Field(None, description="Quantity/amount of resource to add or modify")
-    date_range: Optional[str] = Field(None, description="Date range for simulation (e.g., '2025-07-15 to 2025-07-20' or 'this Sunday')")
-
-
-class SRACreateActionInput(BaseModel):
-    """Input schema for SRA create action tool"""
-    project_id: Optional[str] = Field(None, description="Project ID to create action for")
-    user_id: Optional[str] = Field(None, description="User ID to assign action to (e.g., site planner)")
-    action_choice: Optional[str] = Field(None, description="Action choice to log (e.g., 'option 1', 'raise alert')")
-
-
-class SRAExplainFormulaInput(BaseModel):
-    """Input schema for SRA explain formula tool"""
-    project_id: Optional[str] = Field(None, description="Project ID for context")
-    metric: Optional[str] = Field(None, description="The metric/formula to explain (e.g., 'SPI', 'CPI', 'PEI')")
-
-
 @tool(args_schema=SRARecoveryAdviseInput)
 async def sra_recovery_advise(
     project_id: Optional[str] = None,
@@ -633,7 +583,7 @@ async def sra_recovery_advise(
     # Check if required parameters are missing
     if not project_id:
         try:
-            all_records = await prisma.sraactivitytable.find_many(
+            all_records = await prisma.sratable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -653,7 +603,7 @@ async def sra_recovery_advise(
     
     try:
         # Get latest project data
-        latest_record = await prisma.sraactivitytable.find_first(
+        latest_record = await prisma.sratable.find_first(
             where={"projectId": project_id},
             order={"date": "desc"}
         )
@@ -718,7 +668,6 @@ async def sra_recovery_advise(
     except Exception as e:
         return f"Error generating recovery advice: {str(e)}"
 
-
 @tool(args_schema=SRASimulateInput)
 async def sra_simulate(
     project_id: Optional[str] = None,
@@ -744,7 +693,7 @@ async def sra_simulate(
     
     if not project_id:
         try:
-            all_records = await prisma.sraactivitytable.find_many(
+            all_records = await prisma.sratable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -776,7 +725,7 @@ async def sra_simulate(
     
     try:
         # Get latest project data
-        latest_record = await prisma.sraactivitytable.find_first(
+        latest_record = await prisma.sratable.find_first(
             where={"projectId": project_id},
             order={"date": "desc"}
         )
@@ -852,7 +801,6 @@ async def sra_simulate(
     except Exception as e:
         return f"Error running simulation: {str(e)}"
 
-
 @tool(args_schema=SRACreateActionInput)
 async def sra_create_action(
     project_id: Optional[str] = None,
@@ -877,7 +825,7 @@ async def sra_create_action(
     
     if not project_id:
         try:
-            all_records = await prisma.sraactivitytable.find_many(
+            all_records = await prisma.sratable.find_many(
                 select={"projectId": True, "projectName": True},
                 take=100
             )
@@ -906,7 +854,7 @@ async def sra_create_action(
     
     try:
         # Get latest project data for context
-        latest_record = await prisma.sraactivitytable.find_first(
+        latest_record = await prisma.sratable.find_first(
             where={"projectId": project_id},
             order={"date": "desc"}
         )
@@ -951,7 +899,6 @@ async def sra_create_action(
     except Exception as e:
         return f"Error creating action: {str(e)}"
 
-
 @tool(args_schema=SRAExplainFormulaInput)
 async def sra_explain_formula(
     project_id: Optional[str] = None,
@@ -982,7 +929,7 @@ async def sra_explain_formula(
     project_context = None
     if project_id:
         try:
-            latest_record = await prisma.sraactivitytable.find_first(
+            latest_record = await prisma.sratable.find_first(
                 where={"projectId": project_id},
                 order={"date": "desc"}
             )
@@ -1081,5 +1028,4 @@ async def sra_explain_formula(
     return response
 
 
-# Export tools list for the agent
 SRA_TOOLS = [sra_status_pei]

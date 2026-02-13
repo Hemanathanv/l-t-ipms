@@ -75,6 +75,17 @@ export function useChat(options: UseChatOptions = {}) {
                 sendMessageInternal(ws, content, projectId);
             }
         };
+        
+        ws.onerror = (event) => {
+            console.error('[WS] Connection error:', event);
+            setIsConnected(false);
+        };
+        
+        ws.onclose = (event) => {
+            console.log('[WS] Connection closed:', event.code, event.reason);
+            setIsConnected(false);
+            // Don't auto-reconnect on purpose - let the app handle it
+        };
 
         ws.onmessage = (event) => {
             try {
@@ -230,11 +241,15 @@ export function useChat(options: UseChatOptions = {}) {
 
     const submitFeedback = useCallback(async (messageId: string, feedback: 'positive' | 'negative', note?: string) => {
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/messages/${messageId}/feedback`, {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const { getAuthToken, getAuthHeaders } = await import('@/lib/api');
+            
+            const response = await fetch(`${apiUrl}/messages/${messageId}/feedback`, {
                 method: 'POST',
                 credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...getAuthHeaders(),
                 },
                 body: JSON.stringify({ feedback, note }),
             });
@@ -277,11 +292,15 @@ export function useChat(options: UseChatOptions = {}) {
             accumulatedContentRef.current = '';
             onStreamStart?.();
 
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/messages/${messageId}/edit`, {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const { getAuthHeaders } = await import('@/lib/api');
+            
+            const response = await fetch(`${apiUrl}/messages/${messageId}/edit`, {
                 method: 'PUT',
                 credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...getAuthHeaders(),
                 },
                 body: JSON.stringify({ content: newContent }),
             });
