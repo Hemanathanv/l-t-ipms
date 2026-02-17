@@ -59,41 +59,7 @@ model Message {
   @@map("messages")
 }
 
-// SRA Dataset - Project performance metrics
-model SraTable {
-  id                          Int      @id @default(autoincrement())
-  projectId                   String   @map("project_id")
-  date                        DateTime
-  projectName                 String   @map("project_name")
-  plannedFinishDate           DateTime @map("planned_finish_date")
-  forecastFinishDate          DateTime @map("forecast_finish_date")
-  plannedValueAmount          Float    @map("planned_value_amount")
-  earnedValueAmount           Float    @map("earned_value_amount")
-  actualCostAmount            Float    @map("actual_cost_amount")
-  spiValue                    Float    @map("spi_value")
-  cpiValue                    Float    @map("cpi_value")
-  billingReadinessPct         Float    @map("billing_readiness_pct")
-  peiValue                    Float    @map("pei_value")
-  totalScopeQty               Float    @map("total_scope_qty")
-  rowAvailableQty             Float    @map("row_available_qty")
-  executedQty                 Float    @map("executed_qty")
-  executableProgressPct       Float    @map("executable_progress_pct")
-  remainingScopeQty           Float    @map("remaining_scope_qty")
-  requiredRateQty             Float    @map("required_rate_qty")
-  maxAchievedRateQty          Float    @map("max_achieved_rate_qty")
-  requiredRateFeasibilityPct  Float    @map("required_rate_feasibility_pct")
-  criticalDelayDays           Int      @map("critical_delay_days")
-  topDelayOwnerCategory       String?  @map("top_delay_owner_category")
-  lookaheadPlannedCountWeek   Int      @map("lookahead_planned_count_week")
-  lookaheadCompletedCountWeek Int      @map("lookahead_completed_count_week")
-  lookaheadCompliancePct      Float    @map("lookahead_compliance_pct")
-  criticalDensityPct          Float    @map("critical_density_pct")
-  createdAt                   DateTime @default(now()) @map("created_at")
 
-  @@index([projectId])
-  @@index([date])
-  @@map("sratable")
-}
 
 // User model - stores user credentials and profile
 model User {
@@ -126,37 +92,67 @@ model Session {
   @@map("sessions")
 }
 
-// SRA Activity-Level Dataset - Activity performance metrics with PEI
-model SraActivityTable {
-  id                       Int      @id @default(autoincrement())
-  date                     DateTime
-  projectId                String   @map("project_id")
-  projectName              String   @map("project_name")
-  activityId               String   @map("activity_id")
-  activityName             String   @map("activity_name")
-  isCriticalFlag           Int      @map("is_critical_flag")
-  plannedFinishDate        DateTime @map("planned_finish_date")
-  forecastFinishDate       DateTime @map("forecast_finish_date")
-  plannedStartDate         DateTime @map("planned_start_date")
-  plannedFinishActivityDate DateTime @map("planned_finish_activity_date")
-  plannedValueAmount       Float    @map("planned_value_amount")
-  earnedValueAmount        Float    @map("earned_value_amount")
-  totalScopeQty            Float    @map("total_scope_qty")
-  rowAvailableQty          Float    @map("row_available_qty")
-  executedQty              Float    @map("executed_qty")
-  totalFloatDays           Float    @map("total_float_days")
-  cpiValue                 Float    @map("cpi_value")
-  billingReadinessPct      Float    @map("billing_readiness_pct")
-  riskProfile              Float    @map("risk_profile")
-  spiValue                 Float    @map("spi_value")
-  peiValue                 Float    @map("pei_value")
-  forecastDelayDays        Int      @map("forecast_delay_days")
-  workfrontReadinessPct    Float    @map("workfront_readiness_pct")
-  avgFloat                 Float    @map("avg_float")
-  createdAt                DateTime @default(now()) @map("created_at")
 
-  @@index([projectId])
-  @@index([activityId])
-  @@index([date])
-  @@map("sra_activity_table")
+
+// tbl_01_Project_summary - Project-level summary metrics
+model Tbl01ProjectSummary {
+  id                           Int      @id @default(autoincrement())
+  project_id                   String   @map("project_id")
+  projectKey                   Int      @map("project_key")
+  startDate                    DateTime @map("start_date")
+  endDate                      DateTime @map("end_date")
+  projectDescription           String   @map("project_description")
+  projectLocation              String   @map("project_location")
+  pei                          Float
+  spi                          Float
+  forecastDelayDays            Int      @map("forecast_delay_days")
+  computedDays                 Int      @map("computed_days")
+  extensionExposureDays        Int      @map("extension_exposure_days")
+  workfrontPercentage          Float    @map("workfront_percentage")
+  readyTask                    Int      @map("ready_task")
+  workfrontTotalTasks          Int      @map("workfront_total_tasks")
+  criticalPercentage           Float    @map("critical_percentage")
+  criticalYesCount             Int      @map("critical_yes_count")
+  criticalNoCount              Int      @map("critical_no_count")
+  criticalTotalTasks           Int      @map("critical_total_tasks")
+  executedQuantity             Float    @map("executed_quantity")
+  totalAvailableQuantity       Float    @map("total_available_quantity")
+  executableProgressPercent    Float    @map("executable_progress_percent")
+  tasksPlannedInLookAhead      Int      @map("tasks_planned_in_lookahead")
+  tasksCompletedLookAhead      Int      @map("tasks_completed_lookahead")
+  lookAheadCompliancePercent   Float    @map("look_ahead_compliance_percent")
+  createdAt                    DateTime @default(now()) @map("created_at")
+
+  @@index([project_id])
+  @@index([projectKey])
+  @@map("tbl_01_Project_summary")
+}
+
+// tbl_02_ProjectActivity - Project activity-level data
+model Tbl02ProjectActivity {
+  id                           Int       @id @default(autoincrement())
+  projectKey                   Int       @map("project_key")
+  activityCode                 String    @map("activity_code")
+  activityDescription          String    @map("activity_description")
+  workfrontPct                 Float     @map("workfront_pct")
+  readyTasks                   Int       @map("ready_tasks")
+  totalTasks                   Int       @map("total_tasks")
+  criticalPercentage           Float     @map("critical_percentage")
+  tasksPlannedInLookAhead      Int       @map("tasks_planned_in_lookahead")
+  tasksCompleted               Int       @map("tasks_completed")
+  lookAheadCompliancePercent   Float     @map("look_ahead_compliance_percent")
+  delayDays                    Int       @map("delay_days")
+  computedDelay                Int       @map("computed_delay")
+  taskActualStartDate          DateTime? @map("task_actual_start_date")
+  taskActualFinishDate         DateTime? @map("task_actual_finish_date")
+  taskForecastStartDate        DateTime? @map("task_forecast_start_date")
+  taskForecastFinishDate       DateTime? @map("task_forecast_finish_date")
+  taskPlanStartDate            DateTime? @map("task_plan_start_date")
+  taskPlanFinishDate           DateTime? @map("task_plan_finish_date")
+  taskKey                      String    @map("task_key")
+  createdAt                    DateTime  @default(now()) @map("created_at")
+
+  @@index([projectKey])
+  @@index([activityCode])
+  @@map("tbl_02_ProjectActivity")
 }

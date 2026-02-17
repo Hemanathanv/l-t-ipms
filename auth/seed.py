@@ -3,6 +3,9 @@ Seed script to create default admin user.
 Run with: python -m auth.seed
 """
 import asyncio
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db import get_prisma, close_prisma
 from auth.utils import hash_password
 

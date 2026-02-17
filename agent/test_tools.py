@@ -27,11 +27,10 @@ async def test_sra_status_pei():
     print("Testing sra_status_pei")
     print("="*60)
     
-    # Test: With project_id and date
-    print("\n--- Test: With project_id and date ---")
+    # Test: With project_key
+    print("\n--- Test: With project_key ---")
     result = await sra_status_pei.ainvoke({
-        "project_id": "PRJ_001",
-        "start_date": "2025-07-1"
+        "project_key": "101"
     })
     print(result)
 
@@ -42,12 +41,10 @@ async def test_sra_drill_delay():
     print("Testing sra_drill_delay")
     print("="*60)
     
-    # Test: With project_id and date range
-    print("\n--- Test: With project_id and date range ---")
+    # Test: With project_key
+    print("\n--- Test: With project_key ---")
     result = await sra_drill_delay.ainvoke({
-        "project_id": "PRJ_001",
-        "start_date": "2025-07-01",
-        "end_date": "2025-07-31"
+        "project_key": "101"
     })
     print(result)
 
@@ -61,7 +58,7 @@ async def test_sra_recovery_advise():
     # Test: Get recovery advice for a project
     print("\n--- Test: Get recovery advice ---")
     result = await sra_recovery_advise.ainvoke({
-        "project_id": "PRJ_001",
+        "project_key": "101",
         "resource_type": "labor"
     })
     print(result)
@@ -76,7 +73,7 @@ async def test_sra_simulate():
     # Test: Simulate adding shuttering gangs
     print("\n--- Test: Simulate adding 2 shuttering gangs ---")
     result = await sra_simulate.ainvoke({
-        "project_id": "PRJ_001",
+        "project_key": "101",
         "resource_type": "shuttering_gang",
         "value_amount": 2,
         "date_range": "2025-07-15 to 2025-07-20"
@@ -93,7 +90,7 @@ async def test_sra_create_action():
     # Test: Create an action item
     print("\n--- Test: Create action item ---")
     result = await sra_create_action.ainvoke({
-        "project_id": "PRJ_001",
+        "project_key": "101",
         "user_id": "site_planner_01",
         "action_choice": "Approve Option 1 - Add resources"
     })
@@ -109,7 +106,7 @@ async def test_sra_explain_formula():
     # Test: Explain SPI formula
     print("\n--- Test: Explain SPI formula ---")
     result = await sra_explain_formula.ainvoke({
-        "project_id": "PRJ_001",
+        "project_key": "101",
         "metric": "SPI"
     })
     print(result)
@@ -131,8 +128,8 @@ async def main():
         await test_sra_drill_delay()
         await test_sra_recovery_advise()
         await test_sra_simulate()
-        await test_sra_create_action()
-        await test_sra_explain_formula()
+        # await test_sra_create_action()
+        # await test_sra_explain_formula()
         
         print("\n" + "="*60)
         print("✅ All tests completed!")

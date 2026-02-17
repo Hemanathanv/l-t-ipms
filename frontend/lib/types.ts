@@ -19,16 +19,16 @@ export interface Conversation {
 }
 
 export interface Project {
-    id: string;
+    project_key: number;
     name: string;
+    project_description: string;
+    start_date: string;
+    end_date: string;
+    location: string;
 }
 
 export interface ProjectsResponse {
     projects: Project[];
-    dateRange: {
-        from: string;
-        to: string;
-    };
 }
 
 export interface ConversationHistory {

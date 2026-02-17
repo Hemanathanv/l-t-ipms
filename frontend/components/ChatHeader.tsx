@@ -8,8 +8,8 @@ import Logout from '@/components/user/Logout';
 
 interface ChatHeaderProps {
     title: string;
-    selectedProjectId: string;
-    onProjectChange: (projectId: string) => void;
+    selectedProjectKey: string;
+    onProjectChange: (projectKey: string) => void;
     hideBorder?: boolean;
 }
 
@@ -30,7 +30,7 @@ const versions = [
 
 export function ChatHeader({
     title,
-    selectedProjectId,
+    selectedProjectKey,
     onProjectChange,
     hideBorder = false,
 }: ChatHeaderProps) {
@@ -45,6 +45,7 @@ export function ChatHeader({
         // TODO: Implement upgrade logic
         alert('Upgrade to Pro coming soon!');
     };
+
 
     return (
         <header
@@ -115,29 +116,23 @@ export function ChatHeader({
                     )}
                 </div>
             </div>
+
             <div className="header-right">
                 <div className="project-selector">
                     <label htmlFor="projectSelect">Project:</label>
                     <select
                         id="projectSelect"
-                        value={selectedProjectId}
+                        value={selectedProjectKey}
                         onChange={(e) => onProjectChange(e.target.value)}
                         disabled={isLoading}
                     >
                         <option value="">Select Project</option>
                         {projectsData?.projects.map((project) => (
-                            <option key={project.id} value={project.id}>
+                            <option key={project.project_key} value={project.project_key}>
                                 {project.name}
                             </option>
                         ))}
                     </select>
-                </div>
-                <div className="date-range">
-                    {isLoading
-                        ? 'Loading dates...'
-                        : projectsData?.dateRange
-                            ? `${projectsData.dateRange.from} - ${projectsData.dateRange.to}`
-                            : 'No data'}
                 </div>
                 <Logout className="w-auto px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5" />
             </div>

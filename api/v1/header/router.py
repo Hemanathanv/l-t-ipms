@@ -143,19 +143,36 @@ async def get_projects(token: Optional[str] = Depends(get_session_token)):
     prisma = await get_prisma()
     
     try:
-        all_projects = await prisma.sratable.find_many()
+        # Get distinct projects from project summary table
+        all_projects = await prisma.tbl01projectsummary.find_many(
+            distinct=["projectKey"],
+            order={"projectDescription": "asc"}
+        )
+        
+        # Build unique projects list
         seen = set()
         projects = []
         for row in all_projects:
-            if row.projectId not in seen:
-                seen.add(row.projectId)
+            if row.projectKey not in seen:
+                seen.add(row.projectKey)
                 projects.append({
-                    "id": row.projectId,
-                    "name": row.projectName
+                    "project_key": row.projectKey,
+                    "name": row.project_id,
+                    "project_description": row.projectDescription,
+                    "start_date": row.startDate,
+                    "end_date": row.endDate,
+                    "location": row.projectLocation
                 })
-        print(seen)
-        print(projects)
-        return {"projects": projects}
+        
+        # # Date range (commented out — not available in new schema)
+        # date_stats = await prisma.sraactivitytable.find_first(order={"date": "asc"})
+        # date_stats_max = await prisma.sraactivitytable.find_first(order={"date": "desc"})
+        # date_from = date_stats.date if date_stats else None
+        # date_to = date_stats_max.date if date_stats_max else None
+        
+        return {
+            "projects": projects,
+        }
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -57,6 +57,22 @@ def parse_nullable_string(value: str) -> str | None:
     return value.strip()
 
 
+def parse_nullable_date(date_str: str) -> datetime | None:
+    """Parse date string, return None if 'NULL', 'None', or empty"""
+    if not date_str or date_str.strip() == "" or date_str.strip().upper() == "NULL" or date_str.strip().lower() == "none":
+        return None
+    try:
+        return datetime.strptime(date_str.strip(), "%m/%d/%Y")
+    except ValueError:
+        try:
+            return datetime.strptime(date_str.strip(), "%Y-%m-%d")
+        except ValueError:
+            try:
+                return datetime.strptime(date_str.strip(), "%d:%M.%S")
+            except ValueError:
+                return None
+
+
 async def ingest_csv(csv_path: str, batch_size: int = 100):
     """
     Ingest CSV data into PostgreSQL sratable.
@@ -231,12 +247,159 @@ async def clear_activity_table():
     await prisma.disconnect()
 
 
+async def ingest_project_summary_csv(csv_path: str, batch_size: int = 100):
+    """
+    Ingest tbl_01_Project_summary.csv into PostgreSQL tbl_01_Project_summary table.
+    
+    Args:
+        csv_path: Path to the CSV file
+        batch_size: Number of records to insert per batch
+    """
+    prisma = Prisma()
+    await prisma.connect()
+    
+    print(f"📂 Reading Project Summary CSV from: {csv_path}")
+    
+    csv_file = Path(csv_path)
+    if not csv_file.exists():
+        print(f"❌ File not found: {csv_path}")
+        await prisma.disconnect()
+        return
+    
+    records = []
+    total_inserted = 0
+    
+    with open(csv_file, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        
+        for row in reader:
+            record = {
+                "project_id": row.get("\ufeffProject_ID", ""),
+                "projectKey": parse_int(row.get("Project_Key", "0")),
+                "projectDescription": row.get("Project_Description", ""),
+                "startDate": parse_nullable_date(row.get("start_date", "")),
+                "endDate": parse_nullable_date(row.get("end_date", "")),
+                "projectLocation": row.get("Project_Location", ""),
+                "pei": parse_float(row.get("PEI", "0")),
+                "spi": parse_float(row.get("SPI", "0")),
+                "forecastDelayDays": parse_int(row.get("ForecastDelayDays", "0")),
+                "computedDays": parse_int(row.get("ComputedDays", "0")),
+                "extensionExposureDays": parse_int(row.get("ExtensionExposureDays", "0")),
+                "workfrontPercentage": parse_float(row.get("Workfront_Percentage", "0")),
+                "readyTask": parse_int(row.get("ReadyTask", "0")),
+                "workfrontTotalTasks": parse_int(row.get("WorkfrontTotalTasks", "0")),
+                "criticalPercentage": parse_float(row.get("Critical_Percentage", "0")),
+                "criticalYesCount": parse_int(row.get("CriticalYes_Count", "0")),
+                "criticalNoCount": parse_int(row.get("CriticalNo_Count", "0")),
+                "criticalTotalTasks": parse_int(row.get("CriticalTotalTasks", "0")),
+                "executedQuantity": parse_float(row.get("Executed_Quantity", "0")),
+                "totalAvailableQuantity": parse_float(row.get("Total_Available_Quantity", "0")),
+                "executableProgressPercent": parse_float(row.get("Executable_Progress_Percent", "0")),
+                "tasksPlannedInLookAhead": parse_int(row.get("Tasks_Planned_In_LookAhead", "0")),
+                "tasksCompletedLookAhead": parse_int(row.get("Tasks_Completed_LookAhead", "0")),
+                "lookAheadCompliancePercent": parse_float(row.get("Look_Ahead_Compliance_Percent", "0")),
+            }
+            records.append(record)
+            
+            # Insert in batches
+            if len(records) >= batch_size:
+                await prisma.tbl01projectsummary.create_many(data=records)
+                total_inserted += len(records)
+                print(f"✅ Inserted {total_inserted} project summary records...")
+                records = []
+    
+    # Insert remaining records
+    if records:
+        await prisma.tbl01projectsummary.create_many(data=records)
+        total_inserted += len(records)
+    
+    print(f"🎉 Project summary ingestion complete! Total records inserted: {total_inserted}")
+    
+    # Verify count
+    count = await prisma.tbl01projectsummary.count()
+    print(f"📊 Total records in tbl_01_Project_summary: {count}")
+    
+    await prisma.disconnect()
+
+
+async def ingest_project_activity_csv(csv_path: str, batch_size: int = 100):
+    """
+    Ingest tbl_02_ProjectActivity.csv into PostgreSQL tbl_02_ProjectActivity table.
+    
+    Args:
+        csv_path: Path to the CSV file
+        batch_size: Number of records to insert per batch
+    """
+    prisma = Prisma()
+    await prisma.connect()
+    
+    print(f"📂 Reading Project Activity CSV from: {csv_path}")
+    
+    csv_file = Path(csv_path)
+    if not csv_file.exists():
+        print(f"❌ File not found: {csv_path}")
+        await prisma.disconnect()
+        return
+    
+    records = []
+    total_inserted = 0
+    
+    with open(csv_file, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        
+        for row in reader:
+            record = {
+                "projectKey": parse_int(row.get("\ufeffProject_Key", "0")),
+                "activityCode": row.get("Activity_Code", ""),
+                "activityDescription": row.get("Activity_Description", ""),
+                "workfrontPct": parse_float(row.get("Workfront_Pct", "0")),
+                "readyTasks": parse_int(row.get("Ready_Tasks", "0")),
+                "totalTasks": parse_int(row.get("TotalTasks", "0")),
+                "criticalPercentage": parse_float(row.get("Critical_Percentage", "0")),
+                "tasksPlannedInLookAhead": parse_int(row.get("Tasks_Planned_In_LookAhead", "0")),
+                "tasksCompleted": parse_int(row.get("Tasks_Completed", "0")),
+                "lookAheadCompliancePercent": parse_float(row.get("Look_Ahead_Compliance_Percent", "0")),
+                "delayDays": parse_int(row.get("DelayDays", "0")),
+                "computedDelay": parse_int(row.get("ComputedDelay", "0")),
+                "taskActualStartDate": parse_nullable_date(row.get("Task_Actual_Start_Date", "")),
+                "taskActualFinishDate": parse_nullable_date(row.get("Task_Actual_Finish_Date", "")),
+                "taskForecastStartDate": parse_nullable_date(row.get("Task_Forecast_Start_Date", "")),
+                "taskForecastFinishDate": parse_nullable_date(row.get("Task_Forecast_Finish_Date", "")),
+                "taskPlanStartDate": parse_nullable_date(row.get("Task_Plan_Start_Date", "")),
+                "taskPlanFinishDate": parse_nullable_date(row.get("Task_Plan_Finish_Date", "")),
+                "taskKey": row.get("Task_Key", ""),
+            }
+            records.append(record)
+            
+            # Insert in batches
+            if len(records) >= batch_size:
+                await prisma.tbl02projectactivity.create_many(data=records)
+                total_inserted += len(records)
+                print(f"✅ Inserted {total_inserted} project activity records...")
+                records = []
+    
+    # Insert remaining records
+    if records:
+        await prisma.tbl02projectactivity.create_many(data=records)
+        total_inserted += len(records)
+    
+    print(f"🎉 Project activity ingestion complete! Total records inserted: {total_inserted}")
+    
+    # Verify count
+    count = await prisma.tbl02projectactivity.count()
+    print(f"📊 Total records in tbl_02_ProjectActivity: {count}")
+    
+    await prisma.disconnect()
+
+
 if __name__ == "__main__":
     import sys
     
     # Default CSV paths
     # csv_path = "samples/sra_single_dataset.csv"
-    activity_csv_path = "samples/sra_status_pei_activity_level_10projects_365days.csv"
+    # activity_csv_path = "samples/sra_status_pei_activity_level_10projects_365days.csv"
+    # project_summary_csv_path = "samples/tbl_01_Project_summary.csv"
+    project_activity_csv_path = "samples/tbl_02_ProjectActivity.csv"
     
     # Check for command line arguments
     # if len(sys.argv) > 1:
@@ -250,7 +413,7 @@ if __name__ == "__main__":
         # Ingest activity-level data
         # if len(sys.argv) > 2:
     # activity_csv_path = sys.argv[1]
-    asyncio.run(ingest_activity_csv(activity_csv_path))
+    asyncio.run(ingest_project_activity_csv(project_activity_csv_path))
     # else:
     #     pass
             # csv_path = sys.argv[1]

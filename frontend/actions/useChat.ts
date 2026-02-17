@@ -28,11 +28,11 @@ export function useChat(options: UseChatOptions = {}) {
     const queryClient = useQueryClient();
     const wsRef = useRef<WebSocket | null>(null);
     const accumulatedContentRef = useRef('');
-    const pendingMessageRef = useRef<{ content: string; projectId?: string } | null>(null);
+    const pendingMessageRef = useRef<{ content: string; projectKey?: string } | null>(null);
     const currentThreadIdRef = useRef<string | null>(null);
 
     // Helper to send message on a WebSocket
-    const sendMessageInternal = useCallback((ws: WebSocket, content: string, projectId?: string) => {
+    const sendMessageInternal = useCallback((ws: WebSocket, content: string, projectKey?: string) => {
         // Add user message immediately
         const userMessage: Message = { role: 'user', content };
         setMessages(prev => [...prev, userMessage]);
@@ -47,7 +47,7 @@ export function useChat(options: UseChatOptions = {}) {
         // Send message via WebSocket (thread_id is now in the URL path)
         ws.send(JSON.stringify({
             message: content,
-            project_id: projectId || null,
+            project_key: projectKey || null,
         }));
     }, [onStreamStart]);
 
@@ -70,9 +70,9 @@ export function useChat(options: UseChatOptions = {}) {
 
             // If there's a pending message, send it now
             if (pendingMessageRef.current) {
-                const { content, projectId } = pendingMessageRef.current;
+                const { content, projectKey } = pendingMessageRef.current;
                 pendingMessageRef.current = null;
-                sendMessageInternal(ws, content, projectId);
+                sendMessageInternal(ws, content, projectKey);
             }
         };
 
@@ -235,15 +235,15 @@ export function useChat(options: UseChatOptions = {}) {
         connect(null);
     }, [connect]);
 
-    const sendMessage = useCallback((content: string, projectId?: string) => {
+    const sendMessage = useCallback((content: string, projectKey?: string) => {
         // If not connected, store message and connect
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-            pendingMessageRef.current = { content, projectId };
+            pendingMessageRef.current = { content, projectKey };
             connect(currentThreadIdRef.current);
             return;
         }
 
-        sendMessageInternal(wsRef.current, content, projectId);
+        sendMessageInternal(wsRef.current, content, projectKey);
     }, [connect, sendMessageInternal]);
 
     const stopStreaming = useCallback(() => {

@@ -100,33 +100,20 @@ async def chat(request: ChatRequest, user = Depends(get_current_user)):
     # Generate thread_id if not provided
     thread_id = request.thread_id or str(uuid.uuid4())
     
-    # Get project context if project_id is provided
+    # Get project context if project_key is provided
     project_context = None
-    if request.project_id:
+    if request.project_key:
         prisma = await get_prisma()
         try:
-            # Get project info and date range
-            project_data = await prisma.sraactivitytable.find_first(
-                where={"projectId": request.project_id}
-            )
-            date_stats = await prisma.sraactivitytable.find_first(
-                where={"projectId": request.project_id},
-                order={"date": "asc"}
-            )
-            date_stats_max = await prisma.sraactivitytable.find_first(
-                where={"projectId": request.project_id},
-                order={"date": "desc"}
+            project_data = await prisma.tbl01projectsummary.find_first(
+                where={"projectKey": int(request.project_key)}
             )
             
             if project_data:
-                date_from = date_stats.date.strftime("%Y-%m-%d") if date_stats else "N/A"
-                date_to = date_stats_max.date.strftime("%Y-%m-%d") if date_stats_max else "N/A"
                 project_context = {
-                    "project_id": request.project_id,
-                    "project_name": project_data.projectName,
-                    "date_range": f"{date_from} to {date_to}",
-                    "date_from": date_from,
-                    "date_to": date_to
+                    "project_key": request.project_key,
+                    "project_name": project_data.projectDescription,
+                    "project_location": project_data.projectLocation,
                 }
         except Exception as e:
             print(f"Error getting project context: {e}")
@@ -177,32 +164,20 @@ async def chat_stream(request: ChatRequest, user = Depends(get_current_user)):
     # Generate thread_id if not provided
     thread_id = request.thread_id or str(uuid.uuid4())
     
-    # Get project context if project_id is provided
+    # Get project context if project_key is provided
     project_context = None
-    if request.project_id:
+    if request.project_key:
         prisma = await get_prisma()
         try:
-            project_data = await prisma.sraactivitytable.find_first(
-                where={"projectId": request.project_id}
-            )
-            date_stats = await prisma.sraactivitytable.find_first(
-                where={"projectId": request.project_id},
-                order={"date": "asc"}
-            )
-            date_stats_max = await prisma.sraactivitytable.find_first(
-                where={"projectId": request.project_id},
-                order={"date": "desc"}
+            project_data = await prisma.tbl01projectsummary.find_first(
+                where={"projectKey": int(request.project_key)}
             )
             
             if project_data:
-                date_from = date_stats.date.strftime("%Y-%m-%d") if date_stats else "N/A"
-                date_to = date_stats_max.date.strftime("%Y-%m-%d") if date_stats_max else "N/A"
                 project_context = {
-                    "project_id": request.project_id,
-                    "project_name": project_data.projectName,
-                    "date_range": f"{date_from} to {date_to}",
-                    "date_from": date_from,
-                    "date_to": date_to
+                    "project_key": request.project_key,
+                    "project_name": project_data.projectDescription,
+                    "project_location": project_data.projectLocation,
                 }
         except Exception as e:
             print(f"Error getting project context: {e}")
@@ -211,9 +186,8 @@ async def chat_stream(request: ChatRequest, user = Depends(get_current_user)):
     if project_context:
         context_info = (
             f"\n\n[CONTEXT]\n"
-            f"Selected Project: {project_context.get('project_name', 'Unknown')} ({project_context.get('project_id', 'N/A')})\n"
-            f"Available Date Range: {project_context.get('date_range', 'N/A')}\n"
-            f"When calling tools, use project_id='{project_context.get('project_id', '')}' to filter results.\n"
+            f"Selected Project: {project_context.get('project_name', 'Unknown')} ({project_context.get('project_location', 'N/A')})\n"
+            f"When calling tools, use project_key='{project_context.get('project_key', '')}' to filter results.\n"
             f"[/CONTEXT]"
         )
         enhanced_message = request.message + context_info
@@ -808,7 +782,7 @@ async def websocket_chat(websocket: WebSocket, thread_id: str):
             data = await websocket.receive_json()
             print(data,"DATAA")
             message = data.get("message", "")
-            project_id = data.get("project_id")
+            project_key = data.get("project_key")
             
             if not message:
                 await websocket.send_json({"type": "error", "error": "No message provided"})
@@ -822,22 +796,16 @@ async def websocket_chat(websocket: WebSocket, thread_id: str):
             
             # Build project context
             project_context = None
-            if project_id:
+            if project_key:
                 try:
                     prisma = await get_prisma()
-                    project_data = await prisma.sratable.find_first(where={"projectId": project_id})
-                    date_stats = await prisma.sratable.find_first(where={"projectId": project_id}, order={"date": "asc"})
-                    date_stats_max = await prisma.sratable.find_first(where={"projectId": project_id}, order={"date": "desc"})
+                    project_data = await prisma.tbl01projectsummary.find_first(where={"projectKey": int(project_key)})
                     
                     if project_data:
-                        date_from = date_stats.date.strftime("%Y-%m-%d") if date_stats else "N/A"
-                        date_to = date_stats_max.date.strftime("%Y-%m-%d") if date_stats_max else "N/A"
                         project_context = {
-                            "project_id": project_id,
-                            "project_name": project_data.projectName,
-                            "date_range": f"{date_from} to {date_to}",
-                            "date_from": date_from,
-                            "date_to": date_to,
+                            "project_key": project_key,
+                            "project_name": project_data.projectDescription,
+                            "project_location": project_data.projectLocation,
                         }
                 except Exception as e:
                     print(f"Error getting project context: {e}")
@@ -846,9 +814,8 @@ async def websocket_chat(websocket: WebSocket, thread_id: str):
             if project_context:
                 context_info = (
                     f"\n\n[CONTEXT]\n"
-                    f"Selected Project: {project_context.get('project_name', 'Unknown')} ({project_context.get('project_id', 'N/A')})\n"
-                    f"Available Date Range: {project_context.get('date_range', 'N/A')}\n"
-                    f"When calling tools, use project_id='{project_context.get('project_id', '')}' to filter results.\n"
+                    f"Selected Project: {project_context.get('project_name', 'Unknown')} ({project_context.get('project_location', 'N/A')})\n"
+                    f"When calling tools, use project_key='{project_context.get('project_key', '')}' to filter results.\n"
                     f"[/CONTEXT]"
                 )
                 enhanced_message = message + context_info

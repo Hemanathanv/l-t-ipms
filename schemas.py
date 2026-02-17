@@ -10,7 +10,7 @@ class ChatRequest(BaseModel):
     """Request model for chat endpoint"""
     message: str = Field(..., min_length=1, description="User message")
     thread_id: str | None = Field(None, description="Conversation thread ID (optional, will be generated if not provided)")
-    project_id: str | None = Field(None, description="Selected project ID for context filtering")
+    project_key: str | None = Field(None, description="Selected project key for context filtering")
 
 
 class ChatResponse(BaseModel):

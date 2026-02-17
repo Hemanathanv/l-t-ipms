@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { MapPin, Calendar, Building2 } from 'lucide-react';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatHeader } from '@/components/ChatHeader';
@@ -10,6 +11,7 @@ import { MessageInput } from '@/components/MessageInput';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { useChat } from '@/actions/useChat';
 import { useConversation } from '@/actions/useConversations';
+import { useProjects } from '@/actions/useProjects';
 
 interface ChatContainerProps {
     initialThreadId?: string;
@@ -18,7 +20,12 @@ interface ChatContainerProps {
 // Inner component to access sidebar context
 function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
     const router = useRouter();
-    const [selectedProjectId, setSelectedProjectId] = useState('');
+    const [selectedProjectKey, setSelectedProjectKey] = useState('');
+    const { data: projectsData } = useProjects();
+
+    const selectedProject = projectsData?.projects.find(
+        (p) => String(p.project_key) === selectedProjectKey
+    );
 
     const {
         messages,
@@ -71,7 +78,7 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
     };
 
     const handleSendMessage = (content: string) => {
-        sendMessage(content, selectedProjectId || undefined);
+        sendMessage(content, selectedProjectKey || undefined);
     };
 
     const getChatTitle = () => {
@@ -98,46 +105,74 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
             <main className="main-content">
                 <ChatHeader
                     title={getChatTitle()}
-                    selectedProjectId={selectedProjectId}
-                    onProjectChange={setSelectedProjectId}
+                    selectedProjectKey={selectedProjectKey}
+                    onProjectChange={setSelectedProjectKey}
                     hideBorder={!hasMessages}
                 />
 
-                {isLoadingConversation && initialThreadId ? (
-                    // Loading state when fetching conversation history
-                    <div className="flex-1 flex items-center justify-center">
-                        <LoadingSpinner message="Loading conversation..." size="lg" />
+                <div className="chat-area-wrapper">
+                    <div className="chat-area-main">
+                        {isLoadingConversation && initialThreadId ? (
+                            // Loading state when fetching conversation history
+                            <div className="flex-1 flex items-center justify-center">
+                                <LoadingSpinner message="Loading conversation..." size="lg" />
+                            </div>
+                        ) : hasMessages ? (
+                            // Normal chat layout with messages at top, input at bottom
+                            <>
+                                <MessageList
+                                    messages={messages}
+                                    streamingContent={streamingContent}
+                                    isStreaming={isStreaming}
+                                    isThinking={isThinking}
+                                    thinkingContent={thinkingContent}
+                                    currentToolCall={currentToolCall}
+                                    onEditMessage={editMessage}
+                                    onFeedback={submitFeedback}
+                                />
+                                <MessageInput
+                                    onSend={handleSendMessage}
+                                    isLoading={isStreaming}
+                                />
+                            </>
+                        ) : (
+                            // Centered welcome layout for new conversations
+                            <div className="welcome-container">
+                                <div className="welcome-content">
+                                    <h1 className="welcome-heading">What's on your mind today?</h1>
+                                    <MessageInput
+                                        onSend={handleSendMessage}
+                                        isLoading={isStreaming}
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
-                ) : hasMessages ? (
-                    // Normal chat layout with messages at top, input at bottom
-                    <>
-                        <MessageList
-                            messages={messages}
-                            streamingContent={streamingContent}
-                            isStreaming={isStreaming}
-                            isThinking={isThinking}
-                            thinkingContent={thinkingContent}
-                            currentToolCall={currentToolCall}
-                            onEditMessage={editMessage}
-                            onFeedback={submitFeedback}
-                        />
-                        <MessageInput
-                            onSend={handleSendMessage}
-                            isLoading={isStreaming}
-                        />
-                    </>
-                ) : (
-                    // Centered welcome layout for new conversations
-                    <div className="welcome-container">
-                        <div className="welcome-content">
-                            <h1 className="welcome-heading">What's on your mind today?</h1>
-                            <MessageInput
-                                onSend={handleSendMessage}
-                                isLoading={isStreaming}
-                            />
-                        </div>
-                    </div>
-                )}
+
+                    {selectedProject && (
+                        <aside className="project-info-card">
+                            <div className="project-info-card-header">
+                                <Building2 size={18} />
+                                <span>Project Details</span>
+                            </div>
+                            <div className="project-info-card-body">
+                                <h3 className="project-info-card-title">{selectedProject.project_description}</h3>
+                                <div className="project-info-card-row">
+                                    <MapPin size={14} />
+                                    <span>{selectedProject.location}</span>
+                                </div>
+                                {selectedProject.start_date && selectedProject.end_date && (
+                                    <div className="project-info-card-row">
+                                        <Calendar size={14} />
+                                        <span>
+                                            {new Date(selectedProject.start_date).toLocaleDateString()} — {new Date(selectedProject.end_date).toLocaleDateString()}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        </aside>
+                    )}
+                </div>
             </main>
         </div>
     );

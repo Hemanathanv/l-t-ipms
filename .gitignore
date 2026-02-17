@@ -16,3 +16,6 @@ cache/
 samples
 static
 
+# files
+*.*txt
+
