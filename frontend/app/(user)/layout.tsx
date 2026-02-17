@@ -10,10 +10,10 @@ export default async function AuthLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const response = await getUserSession();
-  if (response?.user) {
-    redirect("/");
-  }
-  
+  // const response = await getUserSession();
+  // if (response?.user) {
+  //   redirect("/");
+  // }
+
   return <>{children}</>;
 }

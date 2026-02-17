@@ -26,20 +26,20 @@ def get_llm() -> ChatOpenAI:
     #     }
     # )
 
-    return ChatOpenAI(
-        model="gemini-2.5-flash",
-        openai_api_key="AIzaSyAXdnW4kDsWWANpgI4mXJigjofIwPSYaeY",
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-    )
-
     # return ChatOpenAI(
-    #     model="qwen3-8b",
-    #     openai_api_key="06bec33a36ee70a637f3e385666d0e1210a2b893681de1c7c5d42fbcbccbcfd8",
-    #     base_url="http://192.168.10.100:5454/v1",
-    #     model_kwargs={
-    #         "stream_options": {"include_usage": True}
-    #     }  # Disable streaming - required for vLLM tool calls
+    #     model="gemini-2.5-flash",
+    #     openai_api_key="AIzaSyAXdnW4kDsWWANpgI4mXJigjofIwPSYaeY",
+    #     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
     # )
+
+    return ChatOpenAI(
+        model="qwen3-8b",
+        openai_api_key="06bec33a36ee70a637f3e385666d0e1210a2b893681de1c7c5d42fbcbccbcfd8",
+        base_url="http://192.168.10.100:5454/v1",
+        model_kwargs={
+            "stream_options": {"include_usage": True}
+        }  # Disable streaming - required for vLLM tool calls
+    )
 
     # return ChatOpenAI(
     #     base_url="https://openrouter.ai/api/v1",

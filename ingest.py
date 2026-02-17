@@ -398,8 +398,8 @@ if __name__ == "__main__":
     # Default CSV paths
     # csv_path = "samples/sra_single_dataset.csv"
     # activity_csv_path = "samples/sra_status_pei_activity_level_10projects_365days.csv"
-    # project_summary_csv_path = "samples/tbl_01_Project_summary.csv"
-    project_activity_csv_path = "samples/tbl_02_ProjectActivity.csv"
+    project_summary_csv_path = "samples/tbl_01_Project_summary.csv"
+    # project_activity_csv_path = "samples/tbl_02_ProjectActivity.csv"
     
     # Check for command line arguments
     # if len(sys.argv) > 1:
@@ -413,7 +413,7 @@ if __name__ == "__main__":
         # Ingest activity-level data
         # if len(sys.argv) > 2:
     # activity_csv_path = sys.argv[1]
-    asyncio.run(ingest_project_activity_csv(project_activity_csv_path))
+    asyncio.run(ingest_project_summary_csv(project_summary_csv_path))
     # else:
     #     pass
             # csv_path = sys.argv[1]
