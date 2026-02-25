@@ -31,6 +31,28 @@ export function useChat(options: UseChatOptions = {}) {
     const pendingMessageRef = useRef<{ content: string; projectKey?: string } | null>(null);
     const currentThreadIdRef = useRef<string | null>(null);
 
+    const refreshConversation = useCallback(async (targetThreadId?: string | null) => {
+        const resolvedThreadId = targetThreadId ?? currentThreadIdRef.current;
+        if (!resolvedThreadId) return;
+
+        try {
+            const response = await fetch(`${API_BASE}/conversations/${resolvedThreadId}`, {
+                credentials: 'include',
+            });
+
+            if (!response.ok) return;
+
+            const data = await response.json();
+            const refreshedMessages: Message[] = (data.messages || []).map((m: Message) => ({
+                ...m,
+                content: filterThinkTags(m.content),
+            }));
+            setMessages(refreshedMessages);
+        } catch (error) {
+            console.error('Error refreshing conversation:', error);
+        }
+    }, []);
+
     // Helper to send message on a WebSocket
     const sendMessageInternal = useCallback((ws: WebSocket, content: string, projectKey?: string) => {
         // Add user message immediately
@@ -127,8 +149,7 @@ export function useChat(options: UseChatOptions = {}) {
                     case 'end':
                         // Finalize the message
                         const finalContent = accumulatedContentRef.current;
-                        const finalThinking = thinkingContent;  // Preserve thinking content
-                        console.log(`[FE-END] finalContent_len=${finalContent.length}, thinkingContent_len=${finalThinking.length}`);
+                        console.log(`[FE-END] finalContent_len=${finalContent.length}`);
 
                         // Extract message IDs from end event
                         const userMessageId = data.user_message_id;
@@ -174,6 +195,8 @@ export function useChat(options: UseChatOptions = {}) {
                         onStreamEnd?.();
                         // Invalidate conversations list to refresh sidebar
                         queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                        // Reload from DB to hydrate IDs + branch metadata (position/branch counts)
+                        void refreshConversation(currentThreadIdRef.current);
                         break;
                     case 'error':
                         console.error('WebSocket error:', data.error);
@@ -199,7 +222,7 @@ export function useChat(options: UseChatOptions = {}) {
         };
 
         wsRef.current = ws;
-    }, [queryClient, onStreamEnd, sendMessageInternal]);
+    }, [queryClient, onStreamEnd, sendMessageInternal, refreshConversation]);
 
     // Connect on mount for new chat
     useEffect(() => {
@@ -283,17 +306,16 @@ export function useChat(options: UseChatOptions = {}) {
 
     const editMessage = useCallback(async (messageId: string, newContent: string) => {
         try {
-            // Find the message index to truncate messages after it
+            // Truncate messages after the edited one in UI
             setMessages(prev => {
                 const index = prev.findIndex(m => m.id === messageId);
                 if (index === -1) return prev;
-                // Keep messages up to including this one (content will be updated)
                 const newMessages = prev.slice(0, index + 1);
-                // Update content
                 newMessages[index] = { ...newMessages[index], content: newContent };
                 return newMessages;
             });
 
+            // Set streaming state — the response will arrive via the active WebSocket
             setIsStreaming(true);
             setIsThinking(true);
             setThinkingContent('');
@@ -302,110 +324,37 @@ export function useChat(options: UseChatOptions = {}) {
             accumulatedContentRef.current = '';
             onStreamStart?.();
 
+            // Step 1: PUT request to update DB (content + delete subsequent messages)
             const response = await fetch(`${API_BASE}/messages/${messageId}/edit`, {
                 method: 'PUT',
                 credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: newContent }),
             });
 
-            if (!response.ok || !response.body) {
+            if (!response.ok) {
                 throw new Error('Failed to edit message');
             }
 
-            // Valid stream, start reading SSE with buffering for partial chunks
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';  // Buffer for incomplete SSE events
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                // Append new chunk to buffer
-                buffer += decoder.decode(value, { stream: true });
-
-                // Process complete SSE events (separated by double newline)
-                const eventBoundary = buffer.lastIndexOf('\n\n');
-                if (eventBoundary === -1) continue; // No complete events yet
-
-                const completeData = buffer.slice(0, eventBoundary);
-                buffer = buffer.slice(eventBoundary + 2); // Keep incomplete part
-
-                const lines = completeData.split('\n\n');
-
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-
-                    try {
-                        const jsonStr = line.slice(6);
-                        if (!jsonStr) continue;
-
-                        const data: StreamEvent = JSON.parse(jsonStr);
-
-                        // Reuse switch logic - duplicated for now for simplicity
-                        // Ideally extract `handleStreamEvent` fn
-                        switch (data.type) {
-                            case 'thinking':
-                                console.log(`[FE-THINKING] received, content_len=${data.content?.length || 0}`);
-                                setIsThinking(true);
-                                if (data.content) {
-                                    setThinkingContent(prev => prev + data.content);
-                                }
-                                break;
-                            case 'stream':
-                            case 'content':
-                                setIsThinking(false);
-                                if (data.content) {
-                                    accumulatedContentRef.current += data.content;
-                                    setStreamingContent(accumulatedContentRef.current);
-                                }
-                                break;
-                            case 'tool_call':
-                                accumulatedContentRef.current = '';
-                                setStreamingContent('');
-                                setIsThinking(false);
-                                setThinkingContent('');
-                                if (data.tool) setCurrentToolCall(data.tool);
-                                break;
-                            case 'tool_result':
-                                setCurrentToolCall(null);
-                                setIsThinking(true);
-                                break;
-                            case 'end':
-                                const finalContent = accumulatedContentRef.current;
-                                accumulatedContentRef.current = '';
-                                setStreamingContent('');
-                                setIsThinking(false);
-                                setCurrentToolCall(null);
-                                setIsStreaming(false);
-
-                                const filteredContent = filterThinkTags(finalContent);
-                                if (filteredContent) {
-                                    const assistantMessage: Message = { role: 'assistant', content: filteredContent };
-                                    setMessages(prev => [...prev, assistantMessage]);
-                                }
-                                onStreamEnd?.();
-                                queryClient.invalidateQueries({ queryKey: ['conversations'] });
-                                break;
-                            case 'error':
-                                console.error('SSE Error:', data.error);
-                                break;
-                        }
-                    } catch (e) {
-                        console.error('Error parsing SSE:', e);
-                    }
-                }
+            // Step 2: Send WebSocket message to trigger agent regeneration via pub/sub
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({
+                    action: 'edit',
+                    message: newContent,
+                }));
+            } else {
+                throw new Error('WebSocket not connected');
             }
+
+            // Response will stream via WebSocket onmessage handler
 
         } catch (error) {
             console.error('Error editing message:', error);
             setIsStreaming(false);
+            setIsThinking(false);
             onStreamEnd?.();
         }
-    }, [queryClient, onStreamStart, onStreamEnd]);
+    }, [onStreamStart, onStreamEnd]);
 
     // Switch to a different branch (version) of a message
     const switchBranch = useCallback(async (messageId: string, branchIndex: number) => {
@@ -434,7 +383,11 @@ export function useChat(options: UseChatOptions = {}) {
 
             if (convResponse.ok) {
                 const data = await convResponse.json();
-                setMessages(data.messages || []);
+                const filteredMessages = (data.messages || []).map((m: Message) => ({
+                    ...m,
+                    content: filterThinkTags(m.content),
+                }));
+                setMessages(filteredMessages);
             }
 
             // Invalidate cache

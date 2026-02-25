@@ -73,6 +73,38 @@ def parse_nullable_date(date_str: str) -> datetime | None:
                 return None
 
 
+def parse_nullable_float(value: str) -> float | None:
+    """Parse float value, return None if empty or invalid"""
+    if not value or value.strip() == "" or value.strip().upper() == "NULL" or value.strip().lower() == "none":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def parse_nullable_int(value: str) -> int | None:
+    """Parse int value, return None if empty or invalid"""
+    if not value or value.strip() == "" or value.strip().upper() == "NULL" or value.strip().lower() == "none":
+        return None
+    try:
+        return int(float(value))
+    except ValueError:
+        return None
+
+
+def parse_bool(value: str) -> bool | None:
+    """Parse boolean value from various string representations"""
+    if not value or value.strip() == "" or value.strip().upper() == "NULL" or value.strip().lower() == "none":
+        return None
+    v = value.strip().lower()
+    if v in ("true", "yes", "1", "y"):
+        return True
+    if v in ("false", "no", "0", "n"):
+        return False
+    return None
+
+
 async def ingest_csv(csv_path: str, batch_size: int = 100):
     """
     Ingest CSV data into PostgreSQL sratable.
@@ -249,7 +281,7 @@ async def clear_activity_table():
 
 async def ingest_project_summary_csv(csv_path: str, batch_size: int = 100):
     """
-    Ingest tbl_01_Project_summary.csv into PostgreSQL tbl_01_Project_summary table.
+    Ingest tbl_01_Project_summary.csv into PostgreSQL tbl_01_project_summary table.
     
     Args:
         csv_path: Path to the CSV file
@@ -268,38 +300,136 @@ async def ingest_project_summary_csv(csv_path: str, batch_size: int = 100):
     
     records = []
     total_inserted = 0
+    skipped = 0
     
     with open(csv_file, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         
         for row in reader:
-            record = {
-                "project_id": row.get("\ufeffProject_ID", ""),
-                "projectKey": parse_int(row.get("Project_Key", "0")),
-                "projectDescription": row.get("Project_Description", ""),
-                "startDate": parse_nullable_date(row.get("start_date", "")),
-                "endDate": parse_nullable_date(row.get("end_date", "")),
-                "projectLocation": row.get("Project_Location", ""),
-                "pei": parse_float(row.get("PEI", "0")),
-                "spi": parse_float(row.get("SPI", "0")),
-                "forecastDelayDays": parse_int(row.get("ForecastDelayDays", "0")),
-                "computedDays": parse_int(row.get("ComputedDays", "0")),
-                "extensionExposureDays": parse_int(row.get("ExtensionExposureDays", "0")),
-                "workfrontPercentage": parse_float(row.get("Workfront_Percentage", "0")),
-                "readyTask": parse_int(row.get("ReadyTask", "0")),
-                "workfrontTotalTasks": parse_int(row.get("WorkfrontTotalTasks", "0")),
-                "criticalPercentage": parse_float(row.get("Critical_Percentage", "0")),
-                "criticalYesCount": parse_int(row.get("CriticalYes_Count", "0")),
-                "criticalNoCount": parse_int(row.get("CriticalNo_Count", "0")),
-                "criticalTotalTasks": parse_int(row.get("CriticalTotalTasks", "0")),
-                "executedQuantity": parse_float(row.get("Executed_Quantity", "0")),
-                "totalAvailableQuantity": parse_float(row.get("Total_Available_Quantity", "0")),
-                "executableProgressPercent": parse_float(row.get("Executable_Progress_Percent", "0")),
-                "tasksPlannedInLookAhead": parse_int(row.get("Tasks_Planned_In_LookAhead", "0")),
-                "tasksCompletedLookAhead": parse_int(row.get("Tasks_Completed_LookAhead", "0")),
-                "lookAheadCompliancePercent": parse_float(row.get("Look_Ahead_Compliance_Percent", "0")),
-            }
-            records.append(record)
+            try:
+                record = {
+                    # Identity
+                    "projectKey": parse_int(row.get("Project_Key", row.get("\ufeffProject_Key", "0"))),
+                    "projectId": row.get("Project_ID", ""),
+                    "projectDescription": row.get("Project_Name", ""),
+                    "projectLocation": row.get("Project_Location", ""),
+
+                    # Dates
+                    "baselineStartDate": parse_date(row.get("Baseline_Start_Date", "")),
+                    "baselineFinishDate": parse_date(row.get("Baseline_Finish_Date", "")),
+                    "forecastStartDate": parse_nullable_date(row.get("Forecast_Start_Date", "")),
+                    "forecastFinishDate": parse_nullable_date(row.get("Forecast_Finish_Date", "")),
+                    "actualStartDate": parse_nullable_date(row.get("Actual_Start_Date", "")),
+                    "contractualEndDate": parse_date(row.get("Contractual_Completion_Date", "")),
+
+                    # Duration
+                    "baselineDurationDays": parse_int(row.get("Baseline_Duration_Days", "0")),
+                    "forecastDurationDays": parse_int(row.get("Forecast_Duration_Days", "0")),
+                    "adjustedTotalDurationDays": parse_int(row.get("Adjusted_Total_Duration_Days", "0")),
+
+                    # Slip / variance
+                    "slipDays": parse_int(row.get("Slip_Days", "0")),
+                    "scheduleVarianceDays": parse_int(row.get("Schedule_Variance_Days", "0")),
+
+                    # PEI
+                    "projectExecutionIndex": parse_float(row.get("Project_Execution_Index", "0")),
+
+                    # EOT
+                    "eotExposureDays": parse_int(row.get("EOT_Exposure_Days", "0")),
+
+                    # SPI per E/P/C
+                    "spiOverall": parse_float(row.get("SPI_Overall", "0")),
+                    "spiEngineering": parse_float(row.get("SPI_Engineering", "0")),
+                    "spiProcurement": parse_float(row.get("SPI_Procurement", "0")),
+                    "spiConstruction": parse_float(row.get("SPI_Construction", "0")),
+
+                    # Cumulative progress — Overall
+                    "cumulativePlannedOverall": parse_float(row.get("Cumulative_Planned_Pct_Overall", "0")),
+                    "cumulativeActualOverall": parse_float(row.get("Cumulative_Actual_Pct_Overall", "0")),
+                    "cumulativeBacklogOverall": parse_float(row.get("Cumulative_Backlog_Pct_Overall", "0")),
+
+                    # Cumulative progress — Engineering
+                    "cumulativePlannedEngineering": parse_float(row.get("Cumulative_Planned_Pct_Engineering", "0")),
+                    "cumulativeActualEngineering": parse_float(row.get("Cumulative_Actual_Pct_Engineering", "0")),
+                    "cumulativeBacklogEngineering": parse_float(row.get("Cumulative_Backlog_Pct_Engineering", "0")),
+
+                    # Cumulative progress — Procurement
+                    "cumulativePlannedProcurement": parse_float(row.get("Cumulative_Planned_Pct_Procurement", "0")),
+                    "cumulativeActualProcurement": parse_float(row.get("Cumulative_Actual_Pct_Procurement", "0")),
+                    "cumulativeBacklogProcurement": parse_float(row.get("Cumulative_Backlog_Pct_Procurement", "0")),
+
+                    # Cumulative progress — Construction
+                    "cumulativePlannedConstruction": parse_float(row.get("Cumulative_Planned_Pct_Construction", "0")),
+                    "cumulativeActualConstruction": parse_float(row.get("Cumulative_Actual_Pct_Construction", "0")),
+                    "cumulativeBacklogConstruction": parse_float(row.get("Cumulative_Backlog_Pct_Construction", "0")),
+
+                    # Max forecast delay per E/P/C
+                    "maxForecastDelayDaysOverall": parse_int(row.get("Max_Forecast_Delay_Days_Overall", "0")),
+                    "maxForecastDelayDaysEngineering": parse_int(row.get("Max_Forecast_Delay_Days_Engineering", "0")),
+                    "maxForecastDelayDaysProcurement": parse_int(row.get("Max_Forecast_Delay_Days_Procurement", "0")),
+                    "maxForecastDelayDaysConstruction": parse_int(row.get("Max_Forecast_Delay_Days_Construction", "0")),
+
+                    # Float stats
+                    "floatTotalTaskCount": parse_int(row.get("Float_Total_Task_Count", "0")),
+                    "floatNegativeTaskCount": parse_int(row.get("Float_Negative_Task_Count", "0")),
+                    "floatZeroTaskCount": parse_int(row.get("Float_Zero_Task_Count", "0")),
+                    "floatNearCriticalCount": parse_int(row.get("Float_Near_Critical_Task_Count", "0")),
+                    "floatPositiveTaskCount": parse_int(row.get("Float_Positive_Task_Count", "0")),
+                    "floatAvgDays": parse_float(row.get("Float_Avg_Days", "0")),
+                    "floatMinDays": parse_int(row.get("Float_Min_Days", "0")),
+                    "floatAtRiskPct": parse_float(row.get("Float_At_Risk_Pct", "0")),
+
+                    # CAD (Critical Activity Density)
+                    "cadOverallPct": parse_float(row.get("CAD_Overall_Pct", "0")),
+                    "cadEngineeringPct": parse_float(row.get("CAD_Engineering_Pct", "0")),
+                    "cadProcurementPct": parse_float(row.get("CAD_Procurement_Pct", "0")),
+                    "cadConstructionPct": parse_float(row.get("CAD_Construction_Pct", "0")),
+
+                    # WR (Workfront Readiness)
+                    "wrOverallPct": parse_float(row.get("Workfront_Readiness_Overall_Pct", "0")),
+                    "wrEngineeringPct": parse_float(row.get("Workfront_Readiness_Engineering_Pct", "0")),
+                    "wrProcurementPct": parse_float(row.get("Workfront_Readiness_Procurement_Pct", "0")),
+                    "wrConstructionPct": parse_float(row.get("Workfront_Readiness_Construction_Pct", "0")),
+
+                    # EP (Executable Progress)
+                    "epOverallPct": parse_float(row.get("Executable_Progress_Overall_Pct", "0")),
+                    "epEngineeringPct": parse_float(row.get("Executable_Progress_Engineering_Pct", "0")),
+                    "epProcurementPct": parse_float(row.get("Executable_Progress_Procurement_Pct", "0")),
+                    "epConstructionPct": parse_float(row.get("Executable_Progress_Construction_Pct", "0")),
+
+                    # Contribution to project
+                    "contributionOverallPct": parse_float(row.get("Contribution_To_Project_Overall_Pct", "0")),
+                    "contributionEngineeringPct": parse_float(row.get("Contribution_To_Project_Engineering_Pct", "0")),
+                    "contributionProcurementPct": parse_float(row.get("Contribution_To_Project_Procurement_Pct", "0")),
+                    "contributionConstructionPct": parse_float(row.get("Contribution_To_Project_Construction_Pct", "0")),
+
+                    # Activity counts
+                    "activitiesTotalCount": parse_int(row.get("Activities_Total_Count", "0")),
+                    "activitiesCompleteCount": parse_int(row.get("Activities_Complete_Count", "0")),
+                    "activitiesInProgressCount": parse_int(row.get("Activities_In_Progress_Count", "0")),
+                    "activitiesOverdueCount": parse_int(row.get("Activities_Overdue_Count", "0")),
+                    "activitiesNotYetDueCount": parse_int(row.get("Activities_Not_Yet_Due_Count", "0")),
+
+                    # Construction LAC
+                    "conLacWeekPct": parse_float(row.get("CON_LAC_Week_Pct", "0")),
+                    "conLacMonthPct": parse_float(row.get("CON_LAC_Month_Pct", "0")),
+                    "conLacCompletedRules": parse_int(row.get("CON_LAC_Completed_Rules", "0")),
+                    "conLacOverdueCount": parse_int(row.get("CON_LAC_Overdue_Count", "0")),
+                    "conLacAtRisk7DayCount": parse_int(row.get("CON_LAC_At_Risk_7Day_Count", "0")),
+                    "conLacAtRisk30DayCount": parse_int(row.get("CON_LAC_At_Risk_30Day_Count", "0")),
+                    "conLacPendingCount": parse_int(row.get("CON_LAC_Pending_Count", "0")),
+
+                    # Procurement LAC
+                    "prcLacWeekPct": parse_float(row.get("PRC_LAC_Week_Pct", "0")),
+                    "prcLacMonthPct": parse_float(row.get("PRC_LAC_Month_Pct", "0")),
+                    "prcLacCompletedRules": parse_int(row.get("PRC_LAC_Completed_Rules", "0")),
+                    "prcLacOverdueCount": parse_int(row.get("PRC_LAC_Overdue_Count", "0")),
+                }
+                records.append(record)
+            except Exception as e:
+                skipped += 1
+                print(f"⚠️ Skipped row due to error: {e}")
+                continue
             
             # Insert in batches
             if len(records) >= batch_size:
@@ -314,17 +444,19 @@ async def ingest_project_summary_csv(csv_path: str, batch_size: int = 100):
         total_inserted += len(records)
     
     print(f"🎉 Project summary ingestion complete! Total records inserted: {total_inserted}")
+    if skipped > 0:
+        print(f"⚠️ Skipped {skipped} rows due to errors")
     
     # Verify count
     count = await prisma.tbl01projectsummary.count()
-    print(f"📊 Total records in tbl_01_Project_summary: {count}")
+    print(f"📊 Total records in tbl_01_project_summary: {count}")
     
     await prisma.disconnect()
 
 
 async def ingest_project_activity_csv(csv_path: str, batch_size: int = 100):
     """
-    Ingest tbl_02_ProjectActivity.csv into PostgreSQL tbl_02_ProjectActivity table.
+    Ingest tbl_02_ProjectActivity.csv into PostgreSQL tbl_project_activity table.
     
     Args:
         csv_path: Path to the CSV file
@@ -343,33 +475,102 @@ async def ingest_project_activity_csv(csv_path: str, batch_size: int = 100):
     
     records = []
     total_inserted = 0
+    skipped = 0
+    
+    # Use current date/time as load metadata since CSV doesn't include it
+    load_date = datetime.now()
     
     with open(csv_file, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         
-        for row in reader:
-            record = {
-                "projectKey": parse_int(row.get("\ufeffProject_Key", "0")),
-                "activityCode": row.get("Activity_Code", ""),
-                "activityDescription": row.get("Activity_Description", ""),
-                "workfrontPct": parse_float(row.get("Workfront_Pct", "0")),
-                "readyTasks": parse_int(row.get("Ready_Tasks", "0")),
-                "totalTasks": parse_int(row.get("TotalTasks", "0")),
-                "criticalPercentage": parse_float(row.get("Critical_Percentage", "0")),
-                "tasksPlannedInLookAhead": parse_int(row.get("Tasks_Planned_In_LookAhead", "0")),
-                "tasksCompleted": parse_int(row.get("Tasks_Completed", "0")),
-                "lookAheadCompliancePercent": parse_float(row.get("Look_Ahead_Compliance_Percent", "0")),
-                "delayDays": parse_int(row.get("DelayDays", "0")),
-                "computedDelay": parse_int(row.get("ComputedDelay", "0")),
-                "taskActualStartDate": parse_nullable_date(row.get("Task_Actual_Start_Date", "")),
-                "taskActualFinishDate": parse_nullable_date(row.get("Task_Actual_Finish_Date", "")),
-                "taskForecastStartDate": parse_nullable_date(row.get("Task_Forecast_Start_Date", "")),
-                "taskForecastFinishDate": parse_nullable_date(row.get("Task_Forecast_Finish_Date", "")),
-                "taskPlanStartDate": parse_nullable_date(row.get("Task_Plan_Start_Date", "")),
-                "taskPlanFinishDate": parse_nullable_date(row.get("Task_Plan_Finish_Date", "")),
-                "taskKey": row.get("Task_Key", ""),
-            }
-            records.append(record)
+        for row_num, row in enumerate(reader, start=1):
+            try:
+                record = {
+                    # Identity
+                    "projectKey": parse_int(row.get("Project_Key", row.get("\ufeffProject_Key", "0"))),
+                    "activityCode": row.get("Activity_Code", "").strip(),
+                    "activityDescription": row.get("Activity_Description", "").strip(),
+                    "domain": parse_nullable_string(row.get("Domain", "")),
+                    "domainCode": parse_nullable_string(row.get("Domain_Code", "")),
+                    "customScurve": parse_nullable_string(row.get("SCurve", "")),
+
+                    # Dates
+                    "baselineStartDate": parse_nullable_date(row.get("Baseline_Start_Date", "")),
+                    "baselineFinishDate": parse_nullable_date(row.get("Baseline_Finish_Date", "")),
+                    "forecastStartDate": parse_nullable_date(row.get("Forecast_Start_Date", "")),
+                    "forecastFinishDate": parse_nullable_date(row.get("Forecast_Finish_Date", "")),
+                    "actualStartDate": parse_nullable_date(row.get("Actual_Start_Date", "")),
+                    "actualFinishDate": parse_nullable_date(row.get("Actual_Finish_Date", "")),
+
+                    # Duration
+                    "baselineDurationDays": parse_nullable_int(row.get("Baseline_Duration_Days", "")),
+                    "forecastDurationDays": parse_nullable_int(row.get("Forecast_Duration_Days", "")),
+                    "adjustedTotalDurationDays": parse_nullable_int(row.get("Adjusted_Total_Duration_Days", "")),
+                    "slipDays": parse_nullable_int(row.get("Slip_Days", "")),
+                    "scheduleVarianceDays": parse_nullable_int(row.get("Schedule_Variance_Days", "")),
+
+                    # Status
+                    "activityStatus": parse_nullable_string(row.get("Activity_Status", "")),
+
+                    # Float & Critical
+                    "totalFloat": parse_nullable_float(row.get("Total_Float_Days", "")),
+                    "isCriticalWrench": parse_bool(row.get("Is_Critical_Wrench", "")),
+                    "projectMinFloatDays": parse_nullable_int(row.get("Project_Min_Float_Days", "")),
+                    "isControllingFloat": parse_bool(row.get("Is_Controlling_Float_Activity", "")),
+                    "floatHealthStatus": parse_nullable_string(row.get("Float_Health_Status", "")),
+                    "floatHealthSortOrder": parse_nullable_int(row.get("Float_Health_Sort_Order", "")),
+
+                    # Progress
+                    "criticalActivityDensityPct": parse_nullable_float(row.get("Critical_Activity_Density_Pct", "")),
+                    "workfrontReadyPct": parse_nullable_float(row.get("Workfront_Ready_Pct", "")),
+                    "plannedProgressPct": parse_nullable_float(row.get("Planned_Progress_Pct", "")),
+                    "actualProgressPct": parse_nullable_float(row.get("Actual_Progress_Pct", "")),
+                    "forecastProgressPct": parse_nullable_float(row.get("Forecast_Progress_Pct", "")),
+                    "progressVariancePct": parse_nullable_float(row.get("Progress_Variance_Pct", "")),
+
+                    # Quantities
+                    "plannedQuantity": parse_nullable_float(row.get("Planned_Quantity", "")),
+                    "earnedQuantity": parse_nullable_float(row.get("Earned_Quantity", "")),
+                    "executableProgressPct": parse_nullable_float(row.get("Executable_Progress_Pct", "")),
+
+                    # Contribution & SPI
+                    "contributionToProjectPct": parse_nullable_float(row.get("Contribution_To_Project_Pct", "")),
+                    "activitySpi": parse_nullable_float(row.get("Activity_SPI", "")),
+
+                    # Forecast delay
+                    "forecastDelayDays": parse_nullable_int(row.get("Forecast_Delay_Days", "")),
+
+                    # Cumulative progress
+                    "cumulativePlannedProgress": parse_nullable_float(row.get("Cumulative_Planned_Progress", "")),
+                    "cumulativeActualProgress": parse_nullable_float(row.get("Cumulative_Actual_Progress", "")),
+                    "cumulativeBacklogPct": parse_nullable_float(row.get("Cumulative_Backlog_Pct", "")),
+                    "domainSpi": parse_nullable_float(row.get("Domain_SPI", "")),
+
+                    # Construction LAC rules
+                    "conTotalRules": parse_nullable_int(row.get("CON_Total_Rules", "")),
+                    "conCompletedRules": parse_nullable_int(row.get("CON_Completed_Rules", "")),
+                    "conOverdueRules": parse_nullable_int(row.get("CON_Overdue_Rules", "")),
+                    "conAtRiskRules7Day": parse_nullable_int(row.get("CON_At_Risk_Rules_7Day", "")),
+                    "conAtRiskRules30Day": parse_nullable_int(row.get("CON_At_Risk_Rules_30Day", "")),
+                    "conPendingRules": parse_nullable_int(row.get("CON_Pending_Rules", "")),
+                    "conLacWeekPct": parse_nullable_float(row.get("CON_LAC_Week_Pct", "")),
+                    "conLacMonthPct": parse_nullable_float(row.get("CON_LAC_Month_Pct", "")),
+
+                    # Procurement LAC rules
+                    "prcTotalRules": parse_nullable_int(row.get("PRC_Total_Rules", "")),
+                    "prcCompletedRules": parse_nullable_int(row.get("PRC_Completed_Rules", "")),
+                    "prcOverdueRules": parse_nullable_int(row.get("PRC_Overdue_Rules", "")),
+                    "prcAtRiskRules7Day": parse_nullable_int(row.get("PRC_At_Risk_Rules_7Day", "")),
+                    "prcAtRiskRules30Day": parse_nullable_int(row.get("PRC_At_Risk_Rules_30Day", "")),
+                    "prcPendingRules": parse_nullable_int(row.get("PRC_Pending_Rules", "")),
+                    "prcLacWeekPct": parse_nullable_float(row.get("PRC_LAC_Week_Pct", "")),
+                    "prcLacMonthPct": parse_nullable_float(row.get("PRC_LAC_Month_Pct", "")),
+                }
+                records.append(record)
+            except Exception as e:
+                skipped += 1
+                print(f"⚠️ Skipped row {row_num} due to error: {e}")
+                continue
             
             # Insert in batches
             if len(records) >= batch_size:
@@ -384,10 +585,34 @@ async def ingest_project_activity_csv(csv_path: str, batch_size: int = 100):
         total_inserted += len(records)
     
     print(f"🎉 Project activity ingestion complete! Total records inserted: {total_inserted}")
+    if skipped > 0:
+        print(f"⚠️ Skipped {skipped} rows due to errors")
     
     # Verify count
     count = await prisma.tbl02projectactivity.count()
-    print(f"📊 Total records in tbl_02_ProjectActivity: {count}")
+    print(f"📊 Total records in tbl_project_activity: {count}")
+    
+    await prisma.disconnect()
+
+
+async def clear_project_summary_table():
+    """Clear all records from tbl_01_project_summary"""
+    prisma = Prisma()
+    await prisma.connect()
+    
+    deleted = await prisma.tbl01projectsummary.delete_many()
+    print(f"🗑️ Deleted {deleted} records from tbl_01_project_summary")
+    
+    await prisma.disconnect()
+
+
+async def clear_project_activity_table():
+    """Clear all records from tbl_project_activity"""
+    prisma = Prisma()
+    await prisma.connect()
+    
+    deleted = await prisma.tbl02projectactivity.delete_many()
+    print(f"🗑️ Deleted {deleted} records from tbl_project_activity")
     
     await prisma.disconnect()
 
@@ -395,30 +620,35 @@ async def ingest_project_activity_csv(csv_path: str, batch_size: int = 100):
 if __name__ == "__main__":
     import sys
     
-    # Default CSV paths
-    # csv_path = "samples/sra_single_dataset.csv"
-    # activity_csv_path = "samples/sra_status_pei_activity_level_10projects_365days.csv"
     project_summary_csv_path = "samples/tbl_01_Project_summary.csv"
-    # project_activity_csv_path = "samples/tbl_02_ProjectActivity.csv"
+    project_activity_csv_path = "samples/tbl_02_ProjectActivity.csv"
     
-    # Check for command line arguments
-    # if len(sys.argv) > 1:
-    # if sys.argv[1] == "--clear":
-    #     print("🗑️ Clearing sratable...")
-    #     asyncio.run(clear_table())
-    # elif sys.argv[1] == "--clear-activity":
-    #     print("🗑️ Clearing sra_activity_table...")
-    #     asyncio.run(clear_activity_table())
-    # if sys.argv[0] == "--activity":
-        # Ingest activity-level data
-        # if len(sys.argv) > 2:
-    # activity_csv_path = sys.argv[1]
-    asyncio.run(ingest_project_summary_csv(project_summary_csv_path))
-    # else:
-    #     pass
-            # csv_path = sys.argv[1]
-            # asyncio.run(ingest_csv(csv_path))
-    # else:
-    #     pass
-        # asyncio.run(ingest_csv(csv_path))
-
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
+        if cmd == "--clear-summary":
+            print("🗑️ Clearing project summary table...")
+            asyncio.run(clear_project_summary_table())
+        elif cmd == "--clear-activity":
+            print("🗑️ Clearing project activity table...")
+            asyncio.run(clear_project_activity_table())
+        elif cmd == "--clear-all":
+            print("🗑️ Clearing all tables...")
+            asyncio.run(clear_project_summary_table())
+            asyncio.run(clear_project_activity_table())
+        elif cmd == "--summary":
+            path = sys.argv[2] if len(sys.argv) > 2 else project_summary_csv_path
+            asyncio.run(ingest_project_summary_csv(path))
+        elif cmd == "--activity":
+            path = sys.argv[2] if len(sys.argv) > 2 else project_activity_csv_path
+            asyncio.run(ingest_project_activity_csv(path))
+        elif cmd == "--all":
+            summary_path = sys.argv[2] if len(sys.argv) > 2 else project_summary_csv_path
+            activity_path = sys.argv[3] if len(sys.argv) > 3 else project_activity_csv_path
+            asyncio.run(ingest_project_summary_csv(summary_path))
+            asyncio.run(ingest_project_activity_csv(activity_path))
+        else:
+            print("Usage: python ingest.py [--summary|--activity|--all|--clear-summary|--clear-activity|--clear-all]")
+    else:
+        # Default: ingest both
+        asyncio.run(ingest_project_summary_csv(project_summary_csv_path))
+        asyncio.run(ingest_project_activity_csv(project_activity_csv_path))

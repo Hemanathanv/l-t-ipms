@@ -107,3 +107,76 @@ async def invalidate_cache(thread_id: str) -> bool:
     except Exception:
         pass
     return False
+
+
+# ─── Pub/Sub for streaming ───────────────────────────────────────────────────
+
+def stream_channel_key(thread_id: str) -> str:
+    """Generate Redis channel name for a streaming session."""
+    return f"stream:{thread_id}"
+
+
+async def publish_stream_event(thread_id: str, event_data: dict) -> bool:
+    """
+    Publish a stream event to the Redis channel for a thread.
+    event_data should be a JSON-serializable dict, e.g.
+    {"type": "stream", "content": "...", "agent": "chat", "seq": 0}
+    """
+    try:
+        client = await get_redis_client()
+        channel = stream_channel_key(thread_id)
+        payload = json.dumps(event_data)
+        await client.publish(channel, payload)
+        return True
+    except Exception as e:
+        print(f"[PUBSUB] Error publishing to {thread_id}: {e}")
+        return False
+
+
+async def subscribe_stream(thread_id: str, ready_event: "asyncio.Event | None" = None):
+    """
+    Async generator that subscribes to the streaming channel for a thread
+    and yields parsed event dicts until an 'end' or 'error' event is received.
+    
+    Args:
+        thread_id: conversation thread ID
+        ready_event: if provided, this event is SET once the subscription is active.
+                     The publisher should await this before starting to publish.
+    
+    Usage:
+        ready = asyncio.Event()
+        asyncio.create_task(publisher(ready))
+        async for event in subscribe_stream(thread_id, ready_event=ready):
+            await websocket.send_json(event)
+    """
+    import asyncio as _asyncio
+    
+    client = await get_redis_client()
+    channel = stream_channel_key(thread_id)
+    pubsub = client.pubsub()
+    
+    try:
+        await pubsub.subscribe(channel)
+        print(f"[PUBSUB] Subscribed to {channel}")
+        
+        # Signal that we're ready to receive
+        if ready_event is not None:
+            ready_event.set()
+        
+        async for message in pubsub.listen():
+            if message["type"] != "message":
+                continue
+            
+            try:
+                event = json.loads(message["data"])
+                yield event
+                
+                # Stop listening after end or error event
+                if event.get("type") in ("end", "error"):
+                    break
+            except json.JSONDecodeError:
+                continue
+    finally:
+        await pubsub.unsubscribe(channel)
+        await pubsub.close()
+        print(f"[PUBSUB] Unsubscribed from {channel}")

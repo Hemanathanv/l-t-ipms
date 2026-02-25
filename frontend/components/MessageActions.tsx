@@ -75,28 +75,6 @@ export function MessageActions({ message, messageIndex, onCopy, onEdit, onFeedba
                         </>
                     )}
 
-                    {/* Branch navigation for assistant messages */}
-                    {hasBranches && onSwitchBranch && (
-                        <div className="branch-nav">
-                            <button
-                                className="action-btn"
-                                onClick={handlePrevBranch}
-                                disabled={currentBranch <= 1}
-                                title="Previous version"
-                            >
-                                <ChevronLeft size={16} />
-                            </button>
-                            <span className="branch-counter">{currentBranch}/{totalBranches}</span>
-                            <button
-                                className="action-btn"
-                                onClick={handleNextBranch}
-                                disabled={currentBranch >= totalBranches}
-                                title="Next version"
-                            >
-                                <ChevronRight size={16} />
-                            </button>
-                        </div>
-                    )}
                 </>
             )}
 

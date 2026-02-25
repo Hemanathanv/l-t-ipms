@@ -40,6 +40,7 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
         submitFeedback,
         loadConversation,
         startNewChat,
+        switchBranch,
     } = useChat();
 
     // Load conversation if initialThreadId is provided
@@ -129,6 +130,7 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
                                     currentToolCall={currentToolCall}
                                     onEditMessage={editMessage}
                                     onFeedback={submitFeedback}
+                                    onSwitchBranch={switchBranch}
                                 />
                                 <MessageInput
                                     onSend={handleSendMessage}

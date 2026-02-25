@@ -157,10 +157,10 @@ async def get_projects(token: Optional[str] = Depends(get_session_token)):
                 seen.add(row.projectKey)
                 projects.append({
                     "project_key": row.projectKey,
-                    "name": row.project_id,
+                    "name": row.projectId,
                     "project_description": row.projectDescription,
-                    "start_date": row.startDate,
-                    "end_date": row.endDate,
+                    "start_date": row.baselineStartDate,
+                    "end_date": row.baselineFinishDate,
                     "location": row.projectLocation
                 })
         

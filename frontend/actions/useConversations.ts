@@ -70,6 +70,7 @@ export function useConversation(threadId: string | null) {
         queryKey: ['conversation', threadId],
         queryFn: () => fetchConversation(threadId!),
         enabled: !!threadId,
+        retry: false, // Don't retry on 404 (conversation may no longer exist)
         staleTime: 30000, // Cache for 30 seconds before refetching
         gcTime: 60000,    // Keep in memory for 1 minute after becoming unused
     });

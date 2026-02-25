@@ -72,7 +72,7 @@ SYSTEM_PROMPT = """You are an intelligent AI assistant for L&T IPMS (Integrated 
 
 3. **FOLLOW-UP SUGGESTIONS**: After each tool response, suggest ONE relevant next step from available tools.
 
-4. **MINIMAL OUTPUT**: Keep responses concise. No long paragraphs. Use the tool output directly with a brief intro.
+4. **PASS THROUGH TOOL OUTPUT VERBATIM**: When a tool returns formatted markdown (tables, headers, icons), display the COMPLETE tool output exactly as-is. Do NOT summarize, paraphrase, or condense tables into paragraphs. Add only a 1-line intro before the tool output if needed.
 
 5. **ASK FOR MISSING INFO**: If a tool requires project_id or dates, the tool will ask - do not make up data.
 
@@ -97,8 +97,26 @@ async def chat_node(state: AgentState) -> dict:
     """
     Main chat node that processes user messages and generates responses.
     Uses LLM with tools bound.
+    
+    If the last message is a ToolMessage from an SRA tool, the tool output
+    is returned directly as an AIMessage to prevent the LLM from summarizing
+    formatted markdown tables.
     """
     from .message_pruner import prune_messages, MAX_CONTEXT_TOKENS
+    
+    # Get the conversation history
+    messages = list(state["messages"])
+    
+    # --- SHORT-CIRCUIT: Pass through SRA tool output directly ---
+    # Small models (Qwen3-8B) tend to summarize/rewrite formatted tool output.
+    # When the last message is a ToolMessage, return it directly as an AIMessage
+    # so the user sees the full formatted table without LLM rewriting.
+    last_msg = messages[-1] if messages else None
+    if isinstance(last_msg, ToolMessage) and last_msg.content:
+        tool_content = last_msg.content
+        # Only short-circuit for SRA tools that return formatted markdown
+        if any(marker in tool_content for marker in ["##", "| ", "**SPI**", "**PEI**", "📊"]):
+            return {"messages": [AIMessage(content=tool_content)]}
     
     llm = get_llm()
     
@@ -106,9 +124,6 @@ async def chat_node(state: AgentState) -> dict:
     # Note: For vLLM, you need to start the server with:
     #   --enable-auto-tool-choice --tool-call-parser hermes
     llm_with_tools = llm.bind_tools(SRA_TOOLS)
-    
-    # Get the conversation history
-    messages = list(state["messages"])
     
     # Add system prompt if this is the start of conversation
     has_system = any(isinstance(m, SystemMessage) for m in messages)
@@ -155,15 +170,15 @@ def build_graph() -> StateGraph:
     tool_node = ToolNode(SRA_TOOLS)
     
     # Add nodes
-    graph_builder.add_node("chat", chat_node)
+    graph_builder.add_node("SR-AGENT", chat_node)
     graph_builder.add_node("tools", tool_node)
     
     # Define the flow
-    graph_builder.add_edge(START, "chat")
+    graph_builder.add_edge(START, "SR-AGENT")
     
     # Conditional edge from chat: either go to tools or end
     graph_builder.add_conditional_edges(
-        "chat",
+        "SR-AGENT",
         should_continue,
         {
             "tools": "tools",
@@ -172,7 +187,7 @@ def build_graph() -> StateGraph:
     )
     
     # After tools, always go back to chat for LLM to process results
-    graph_builder.add_edge("tools", "chat")
+    graph_builder.add_edge("tools", "SR-AGENT")
     
     return graph_builder
 

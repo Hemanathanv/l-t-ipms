@@ -24,7 +24,6 @@ def _threshold_footer() -> str:
     return (
         "\n\n---\n"
         "📌 **Ideal Thresholds** │ "
-        f"Workfront ≥ {WORKFRONT_READINESS_THRESHOLD:.0f}% │ "
         f"SPI ≥ {SPI_THRESHOLD} │ "
         f"PEI < {PEI_THRESHOLD} │ "
         f"Delay ≤ {FORECAST_DELAY_THRESHOLD}d"
@@ -35,10 +34,6 @@ class SRAStatusInput(BaseModel):
     """Input schema for SRA status tool"""
     project_key: Optional[str] = Field(None, description="project_key to filter by (e.g., '101'). Required for status check.")
     date: Optional[str] = Field(None, description="Date in YYYY-MM-DD format (e.g., '2025-01-15'). If not provided, uses latest available data.")
-    response_style: Optional[str] = Field(
-        "standard", 
-        description="Response verbosity: 'standard' (verdict + key metrics), 'detailed' (full analysis), 'metrics' (KPI-focused)"
-    )
 
 
 class SRADrillDelayInput(BaseModel):
@@ -64,8 +59,7 @@ def parse_date(date_str: str) -> Optional[date]:
 @tool(args_schema=SRAStatusInput)
 async def sra_status_pei(
     project_key: Optional[str] = None,
-    date: Optional[str] = None,
-    response_style: Optional[str] = "standard"
+    date: Optional[str] = None
 ) -> str:
     """
     Get project schedule health status using gated decision logic.
@@ -84,22 +78,14 @@ async def sra_status_pei(
     ❌ What-if scenarios → use sra_simulate
     
     HEALTH CLASSIFICATION (Gated Logic):
-    Gate 1: Workfront Readiness < 70% → NOT OK (Execution constrained)
-    Gate 2: SPI < 0.95 → NOT OK (Schedule unreliable)
-    Gate 3: Forecast Delay > 30 days → NOT OK (Material slippage)
-    Otherwise → OK
+    Gate 1: SPI < 0.95 → AT RISK (Schedule unreliable)
+    Gate 2: PEI > 1.0 → AT RISK (Forecast exceeds plan)
+    Gate 3: Forecast Delay > 30 days → AT RISK (Material slippage)
+    Otherwise → ON TRACK
     
-    RESPONSE STYLES:
-    - 'standard': Verdict + key reasons (default)
-    - 'detailed': Full analysis with all metrics
-    - 'metrics': KPI-focused with health verdict
+    OUTPUT: Health + Overall % + SPI/PEI + E/P/C breakdown
     """
     prisma = await get_prisma()
-    
-    # Normalize response_style
-    style = (response_style or "standard").lower().strip()
-    if style not in ["standard", "detailed", "metrics"]:
-        style = "standard"
     
     # ===== PARAMETER VALIDATION =====
     if not project_key:
@@ -136,198 +122,143 @@ async def sra_status_pei(
         # Extract project-level metrics
         project_name = project_summary.projectDescription
         project_location = project_summary.projectLocation
-        pei_value = project_summary.pei
-        spi_value = project_summary.spi
-        forecast_delay_days = project_summary.forecastDelayDays
-        computed_days = project_summary.computedDays
-        extension_exposure_days = project_summary.extensionExposureDays
-        workfront_readiness = project_summary.workfrontPercentage * 100
-        ready_tasks = project_summary.readyTask
-        workfront_total_tasks = project_summary.workfrontTotalTasks
-        critical_pct = project_summary.criticalPercentage
-        executed_qty = project_summary.executedQuantity
-        total_available_qty = project_summary.totalAvailableQuantity
-        executable_progress_pct = project_summary.executableProgressPercent
-        tasks_planned_lookahead = project_summary.tasksPlannedInLookAhead
-        tasks_completed_lookahead = project_summary.tasksCompletedLookAhead
-        lookahead_compliance_pct = project_summary.lookAheadCompliancePercent
+        pei_value = project_summary.projectExecutionIndex
+        spi_value = project_summary.spiOverall
+        forecast_delay_days = project_summary.maxForecastDelayDaysOverall
+        eot_exposure_days = project_summary.eotExposureDays
+        executable_progress_pct = project_summary.epOverallPct
+        cumulative_planned = project_summary.cumulativePlannedOverall
+        cumulative_actual = project_summary.cumulativeActualOverall
         
         # ===== GATED HEALTH CLASSIFICATION =====
-        status = "OK"
+        status = "On Track"
         status_icon = "✅"
         primary_reason = ""
-        secondary_reasons = []
+        risk_factors = []
         
-        # Gate 1: Workfront Readiness (Reality Gate)
-        if workfront_readiness < WORKFRONT_READINESS_THRESHOLD:
-            status = "NOT OK"
-            status_icon = "🔴"
-            primary_reason = f"Only {workfront_readiness:.1f}% workfronts available - plan is not executable"
-        
-        # Gate 2: SPI (Schedule Signal)
-        elif spi_value < SPI_THRESHOLD:
-            status = "NOT OK"
+        # Gate 1: SPI (Schedule Signal)
+        if spi_value < SPI_THRESHOLD:
+            status = "At Risk"
             status_icon = "🔴"
             primary_reason = f"SPI at {spi_value:.2f} - schedule is unreliable"
 
+        # Gate 2: PEI (Efficiency)
         elif pei_value > PEI_THRESHOLD:
-            status = "NOT OK"
+            status = "At Risk"
             status_icon = "🔴"
-            primary_reason = f"PEI at {pei_value:.2f} - forecast duration exceeds plan (less efficient)"
+            primary_reason = f"PEI at {pei_value:.2f} - forecast duration exceeds plan"
         
         # Gate 3: Forecast Delay (Time Tolerance)
         elif forecast_delay_days > FORECAST_DELAY_THRESHOLD:
-            status = "NOT OK"
+            status = "At Risk"
             status_icon = "🔴"
             primary_reason = f"{forecast_delay_days}-day forecast delay - material slippage"
         
         else:
-            status = "OK"
+            status = "On Track"
             status_icon = "✅"
             primary_reason = "Schedule is healthy"
         
-        # Build secondary reasons
-        if workfront_readiness < WORKFRONT_READINESS_THRESHOLD:
-            secondary_reasons.append(f"Workfront at {workfront_readiness:.1f}%")
+        # Collect all risk factors
         if spi_value < SPI_THRESHOLD:
-            secondary_reasons.append(f"SPI at {spi_value:.2f}")
+            risk_factors.append(f"SPI at {spi_value:.2f}")
+        if pei_value > PEI_THRESHOLD:
+            risk_factors.append(f"PEI at {pei_value:.2f}")
         if forecast_delay_days > FORECAST_DELAY_THRESHOLD:
-            secondary_reasons.append(f"{forecast_delay_days}d delay")
+            risk_factors.append(f"{forecast_delay_days}d delay")
         
-        # ===== FORMAT RESPONSE BY STYLE =====
+        # ===== FORMAT RESPONSE =====
         
-        # ----- METRICS STYLE (KPI-focused with verdict) -----
-        if style == "metrics":
-            response = f"## {status_icon} {status} — {project_name}\n"
-            response += f"*Location: {project_location}*\n\n"
-            
-            response += "### 📊 Project-Level Metrics\n\n"
-            response += "| Metric | Value | Status |\n"
-            response += "|--------|-------|--------|\n"
-            response += f"| SPI | {spi_value:.4f} | {'✅' if spi_value >= SPI_THRESHOLD else '❌'} |\n"
-            response += f"| PEI | {pei_value:.4f} | {'✅' if pei_value <= 1.0 else '⚠️'} |\n"
-            response += f"| Workfront | {workfront_readiness:.1f}% | {'✅' if workfront_readiness >= WORKFRONT_READINESS_THRESHOLD else '❌'} |\n"
-            response += f"| Forecast Delay | {forecast_delay_days}d | {'✅' if forecast_delay_days <= FORECAST_DELAY_THRESHOLD else '❌'} |\n"
-            response += f"| Computed Days | {computed_days}d | — |\n"
-            response += f"| Extension Exposure | {extension_exposure_days}d | {'⚠️' if extension_exposure_days > 0 else '✅'} |\n"
-            response += f"| Executable Progress | {executable_progress_pct:.1f}% | — |\n"
-            response += f"| Lookahead Compliance | {lookahead_compliance_pct:.1f}% | {'✅' if lookahead_compliance_pct >= 60 else '⚠️'} |\n\n"
-            
-            response += f"**Verdict**: {primary_reason}"
-            return response + _threshold_footer()
+        # === Query activity table for E/P/C breakdown ===
+        activities = await prisma.tbl02projectactivity.find_many(
+            where={
+                "projectKey": project_key_int
+            }
+        )
         
-        # ----- STANDARD STYLE (Verdict + key reasons) -----
-        if style == "standard":
-            response = f"## {status_icon} Schedule Health: **{status}**\n\n"
-            response += f"**{project_name}** ({project_location})\n\n"
-            
-            # Project-level summary
-            response += "### 🏗️ Project-Level Summary\n\n"
-            if status == "OK":
-                response += "Schedule health is **OK**.\n\n"
-                spi_meaning = "On/Ahead of schedule" if spi_value >= 1.0 else "Slightly behind"
-                pei_meaning = "Efficient" if pei_value <= 1.0 else "Taking more time"
-                delay_meaning = "Within tolerance" if forecast_delay_days <= FORECAST_DELAY_THRESHOLD else "Slipping"
-                wf_meaning = "Ready" if workfront_readiness >= WORKFRONT_READINESS_THRESHOLD else "Constrained"
-                response += "| Metric | Value | Meaning |\n"
-                response += "|--------|-------|---------|\n"
-                response += f"| SPI | {spi_value:.2f} | ✅ {spi_meaning} |\n"
-                response += f"| PEI | {pei_value:.2f} | ✅ {pei_meaning} |\n"
-                response += f"| Forecast Delay | {forecast_delay_days}d | ✅ {delay_meaning} |\n"
-                response += f"| Workfront | {workfront_readiness:.1f}% | ✅ {wf_meaning} ({ready_tasks}/{workfront_total_tasks} ready) |\n"
-                response += f"| Executable Progress | {executable_progress_pct:.1f}% | — |\n\n"
-                response += "**No immediate schedule intervention required.**\n"
-            
-            else:  # NOT OK
-                response += "Schedule health is **NOT OK**.\n\n"
-                response += f"**Issue**: {primary_reason}\n\n"
-                spi_meaning = "On schedule" if spi_value >= 1.0 else f"Behind by {(1 - spi_value) * 100:.0f}%"
-                pei_meaning = "On/Ahead of plan" if pei_value <= 1.0 else f"Taking {(pei_value - 1) * 100:.0f}% more time"
-                delay_meaning = "Within tolerance" if forecast_delay_days <= FORECAST_DELAY_THRESHOLD else f"{forecast_delay_days}d overrun"
-                wf_meaning = "Ready" if workfront_readiness >= WORKFRONT_READINESS_THRESHOLD else f"Only {workfront_readiness:.1f}% available"
-                spi_icon = "✅" if spi_value >= SPI_THRESHOLD else "❌"
-                pei_icon = "✅" if pei_value <= PEI_THRESHOLD else "❌"
-                delay_icon = "✅" if forecast_delay_days <= FORECAST_DELAY_THRESHOLD else "❌"
-                wf_icon = "✅" if workfront_readiness >= WORKFRONT_READINESS_THRESHOLD else "❌"
-                response += "| Metric | Value | Meaning |\n"
-                response += "|--------|-------|---------|\n"
-                response += f"| SPI | {spi_value:.2f} | {spi_icon} {spi_meaning} |\n"
-                response += f"| PEI | {pei_value:.2f} | {pei_icon} {pei_meaning} |\n"
-                response += f"| Forecast Delay | {forecast_delay_days}d | {delay_icon} {delay_meaning} |\n"
-                response += f"| Workfront | {workfront_readiness:.1f}% | {wf_icon} {wf_meaning} |\n\n"
-                response += "\n💬 *Would you like me to drill down into the root causes of these delays?*\n"
-            
-            return response + _threshold_footer()
+        # --- HEADER: Project Health Risk ---
+        response = f"## {status_icon} Project Health: **{status}**\n\n"
+        response += f"**{project_name}** ({project_location})\n\n"
         
-        # ----- DETAILED STYLE (Full analysis) -----
-        if style == "detailed":
-            response = f"## {status_icon} Schedule Health: **{status}**\n\n"
-            response += f"**Project**: {project_name} (Key: {project_key})\n"
-            response += f"**Location**: {project_location}\n\n"
-            response += "---\n\n"
-            
-            # Status Assessment
-            if status == "OK":
-                response += "### ✅ Status Assessment\n\n"
-                response += "Schedule health is **OK**.\n\n"
-                response += f"| Gate | Metric | Value | Threshold | Result |\n"
-                response += f"|------|--------|-------|-----------|--------|\n"
-                response += f"| Reality | Workfront Readiness | {workfront_readiness:.1f}% | ≥70% | ✅ Pass |\n"
-                response += f"| Schedule | SPI | {spi_value:.4f} | ≥0.95 | ✅ Pass |\n"
-                response += f"| Tolerance | Forecast Delay | {forecast_delay_days}d | ≤30d | ✅ Pass |\n\n"
-                response += "**No immediate schedule intervention required.**\n\n"
-            
-            else:  # NOT OK
-                response += "### 🔴 Status Assessment\n\n"
-                response += "Schedule health is **NOT OK**.\n\n"
-                response += f"**Primary Issue**: {primary_reason}\n\n"
-                
-                wf_result = "✅ Pass" if workfront_readiness >= WORKFRONT_READINESS_THRESHOLD else "❌ FAIL"
-                spi_result = "✅ Pass" if spi_value >= SPI_THRESHOLD else "❌ FAIL"
-                delay_result = "✅ Pass" if forecast_delay_days <= FORECAST_DELAY_THRESHOLD else "❌ FAIL"
-                
-                response += f"| Gate | Metric | Value | Threshold | Result |\n"
-                response += f"|------|--------|-------|-----------|--------|\n"
-                response += f"| Reality | Workfront Readiness | {workfront_readiness:.1f}% | ≥70% | {wf_result} |\n"
-                response += f"| Schedule | SPI | {spi_value:.4f} | ≥0.95 | {spi_result} |\n"
-                response += f"| Tolerance | Forecast Delay | {forecast_delay_days}d | ≤30d | {delay_result} |\n\n"
-                response += "💡 **Recommendation**: Recovery actions required.\n\n"
-                response += "💬 *Shall I drill down into the root causes and identify which activities are driving the delay?*\n\n"
-            
-            # Project-Level Contextual Metrics
-            response += "---\n\n"
-            response += "### 📊 Project-Level Metrics\n\n"
-            
-            pei_icon = "🟢" if pei_value <= 1.0 else ("🟡" if pei_value < 1.5 else "🔴")
-            pei_interp = "On/Ahead of schedule" if pei_value <= 1.0 else ("Taking more time than planned" if pei_value < 1.5 else "Significant schedule inefficiency")
-            
-            response += f"| Metric | Value | Interpretation |\n"
-            response += f"|--------|-------|----------------|\n"
-            response += f"| PEI | {pei_value:.4f} | {pei_icon} {pei_interp} |\n"
-            response += f"| SPI | {spi_value:.4f} | {'🟢 On Schedule' if spi_value >= 1.0 else '⚠️ Behind'} |\n"
-            response += f"| Workfront | {workfront_readiness:.1f}% | {'🟢' if workfront_readiness >= WORKFRONT_READINESS_THRESHOLD else '🔴'} ({ready_tasks}/{workfront_total_tasks} ready) |\n"
-            response += f"| Forecast Delay | {forecast_delay_days}d | {'🟢' if forecast_delay_days <= FORECAST_DELAY_THRESHOLD else '🔴'} |\n"
-            response += f"| Computed Days | {computed_days}d | — |\n"
-            response += f"| Extension Exposure | {extension_exposure_days}d | {'⚠️ Risk' if extension_exposure_days > 0 else '✅ None'} |\n"
-            response += f"| Executable Progress | {executable_progress_pct:.1f}% | — |\n"
-            response += f"| Executed / Available Qty | {executed_qty:,.0f} / {total_available_qty:,.0f} | — |\n"
-            response += f"| Lookahead Compliance | {lookahead_compliance_pct:.1f}% | {'�' if lookahead_compliance_pct >= 60 else '⚠️'} ({tasks_completed_lookahead}/{tasks_planned_lookahead}) |\n\n"
-            
-
-            
-            # Decision Basis
-            response += "\n---\n\n"
-            response += "### ℹ️ Decision Basis\n\n"
-            response += "Health is determined by gated rules (in order):\n"
-            response += "1. **Workfront Readiness** (Reality Gate) → Is the plan executable?\n"
-            response += "2. **SPI** (Schedule Signal) → Is the schedule reliable?\n"
-            response += "3. **Forecast Delay** (Time Tolerance) → Is slippage within limits?\n\n"
-            response += "*PEI is contextual reinforcement, not the primary verdict.*"
-            
-            return response + _threshold_footer()
+        # --- OVERALL % and DELAY DAYS ---
+        response += f"📊 **Overall Progress**: Planned {cumulative_planned:.1f}% · Actual {cumulative_actual:.1f}%  ·  "
+        response += f"**Forecast Delay**: {forecast_delay_days} days\n\n"
+        if primary_reason and status == "At Risk":
+            response += f"⚠️ *{primary_reason}*\n\n"
         
-        # Fallback
-        return f"{status_icon} **{status}** — {project_name}: {primary_reason}" + _threshold_footer()
+        response += "---\n\n"
+        
+        # --- Compute E/P/C data for side-by-side table ---
+        epc_groups = {}
+        for act in activities:
+            code = (act.domainCode or act.domain or "").strip().upper()
+            if code in ("ENG", "E", "ENGINEERING"):
+                key = "E"
+            elif code in ("PRC", "P", "PROCUREMENT"):
+                key = "P"
+            elif code in ("CON", "C", "CONSTRUCTION"):
+                key = "C"
+            else:
+                key = code if code else "—"
+            epc_groups.setdefault(key, []).append(act)
+        
+        # Build EPC summary rows
+        epc_rows = []
+        for cat_key in ["E", "P", "C"]:
+            if cat_key in epc_groups:
+                cat_acts = epc_groups[cat_key]
+                planned_vals = [a.plannedProgressPct for a in cat_acts if a.plannedProgressPct is not None]
+                actual_vals = [a.actualProgressPct for a in cat_acts if a.actualProgressPct is not None]
+                avg_planned = sum(planned_vals) / len(planned_vals) if planned_vals else 0
+                avg_actual = sum(actual_vals) / len(actual_vals) if actual_vals else 0
+                delay_days_list = []
+                for a in cat_acts:
+                    if a.forecastDelayDays is not None and a.forecastDelayDays > 0:
+                        delay_days_list.append(a.forecastDelayDays)
+                    elif a.forecastFinishDate and a.baselineFinishDate:
+                        diff = (a.forecastFinishDate - a.baselineFinishDate).days
+                        if diff > 0:
+                            delay_days_list.append(diff)
+                avg_delay = sum(delay_days_list) / len(delay_days_list) if delay_days_list else 0
+                cat_icon = "✅" if avg_actual >= avg_planned * 0.95 else "⚠️"
+                epc_rows.append({
+                    "key": cat_key,
+                    "tasks": len(cat_acts),
+                    "planned": avg_planned,
+                    "actual": avg_actual,
+                    "delay": avg_delay,
+                    "icon": cat_icon
+                })
+            else:
+                epc_rows.append({"key": cat_key, "tasks": 0, "planned": 0, "actual": 0, "delay": 0, "icon": "—"})
+        
+        # --- LEFT + RIGHT: Side-by-side SPI/PEI | E/P/C ---
+        spi_icon = "✅" if spi_value >= SPI_THRESHOLD else "❌"
+        pei_icon = "✅" if pei_value <= PEI_THRESHOLD else "❌"
+        spi_meaning = "On schedule" if spi_value >= 1.0 else f"Behind {(1 - spi_value) * 100:.0f}%"
+        pei_meaning = "Efficient" if pei_value <= 1.0 else f"{(pei_value - 1) * 100:.0f}% over"
+        
+        response += "| Schedule Index | Value | Status | | EPC Category | Planned % | Actual % | Delay |\n"
+        response += "|---------------|-------|--------|-|--------------|-----------|----------|-------|\n"
+        
+        # Row 1: SPI | E
+        e = epc_rows[0]
+        response += f"| {spi_icon} **SPI** | {spi_value:.2f} | {spi_meaning} | | {e['icon']} **E** ({e['tasks']}) | {e['planned']:.1f}% | {e['actual']:.1f}% | {e['delay']:.0f}d |\n"
+        
+        # Row 2: PEI | P
+        p = epc_rows[1]
+        response += f"| {pei_icon} **PEI** | {pei_value:.2f} | {pei_meaning} | | {p['icon']} **P** ({p['tasks']}) | {p['planned']:.1f}% | {p['actual']:.1f}% | {p['delay']:.0f}d |\n"
+        
+        # Row 3: (empty left) | C
+        c = epc_rows[2]
+        response += f"| | | | | {c['icon']} **C** ({c['tasks']}) | {c['planned']:.1f}% | {c['actual']:.1f}% | {c['delay']:.0f}d |\n"
+        
+        response += "\n"
+        
+        if status == "At Risk":
+            response += "💬 *Would you like me to drill down into the root causes of these delays?*\n"
+        
+        return response + _threshold_footer()
         
     except ValueError:
         return f"Invalid project_key '{project_key}'. Please provide a numeric project key (e.g., 101, 107)."
@@ -398,80 +329,97 @@ async def sra_drill_delay(
             return f"No data found for project_key {project_key}."
         
         project_name = project_summary.projectDescription
-        forecast_delay_days = project_summary.forecastDelayDays
+        forecast_delay_days = project_summary.maxForecastDelayDaysOverall
         
-        # Get activity-level data
+        # Get activity-level data (current snapshot)
         activities = await prisma.tbl02projectactivity.find_many(
-            where={"projectKey": project_key_int}
+            where={
+                "projectKey": project_key_int,
+            }
         )
         
         if not activities:
             return f"No activity data found for project_key {project_key}."
         
-        # Identify delayed activities
+        # Compute delay days from dates (forecast finish - plan finish)
+        def _get_delay(act):
+            if act.forecastDelayDays is not None and act.forecastDelayDays > 0:
+                return act.forecastDelayDays
+            if act.forecastFinishDate and act.baselineFinishDate:
+                return max(0, (act.forecastFinishDate - act.baselineFinishDate).days)
+            return 0
+        
         delayed_activities = sorted(
-            [a for a in activities if a.delayDays > 0],
-            key=lambda x: -x.delayDays
+            [a for a in activities if _get_delay(a) > 0],
+            key=lambda x: -_get_delay(x)
         )
-        low_workfront = [a for a in activities if a.workfrontPct < 70]
         
         response = f"## 🔍 SRA Delay Analysis\n\n"
         response += f"**Project**: {project_name} (Key: {project_key})\n"
         response += f"**Location**: {project_summary.projectLocation}\n"
         response += f"**Forecast Delay**: {forecast_delay_days} days\n"
-        response += f"**SPI**: {project_summary.spi:.4f}\n\n"
+        response += f"**SPI**: {project_summary.spiOverall:.4f}\n\n"
         response += "---\n\n"
         
         # Delayed Activities Breakdown
         response += "### 🔴 Delayed Activities\n\n"
         if delayed_activities:
             response += f"Found **{len(delayed_activities)}** delayed activities:\n\n"
-            response += "| Activity | Delay (days) | Computed Delay | Workfront % | Lookahead Compliance |\n"
-            response += "|----------|-------------|----------------|-------------|---------------------|\n"
-            for act in delayed_activities[:10]:
-                wf_icon = "✅" if act.workfrontPct >= 70 else "⚠️"
-                response += f"| {act.activityDescription} | {act.delayDays}d | {act.computedDelay}d | {act.workfrontPct:.1f}% {wf_icon} | {act.lookAheadCompliancePercent:.1f}% |\n"
+            response += "| Activity | Category | Delay (days) | Critical | Workfront | LAC % |\n"
+            response += "|----------|----------|-------------|----------|-----------|-------|\n"
+            for act in delayed_activities[:15]:
+                delay_d = _get_delay(act)
+                wf_icon = "✅" if (act.workfrontReadyPct or 0) >= 70 else "❌"
+                cat = act.domainCode or act.domain or "—"
+                crit = "⚠️ Yes" if act.isCriticalWrench else "No"
+                lac_week = f"{act.conLacWeekPct:.1f}%" if act.conLacWeekPct is not None else "—"
+                response += f"| {act.activityDescription} | {cat} | {delay_d}d | {crit} | {wf_icon} | {lac_week} |\n"
         else:
             response += "✅ No delayed activities found.\n"
         
         response += "\n---\n\n"
         
-        # Low Workfront Activities
-        response += "### ⚠️ Low Workfront Readiness Activities\n\n"
-        if low_workfront:
-            response += f"Found **{len(low_workfront)}** activities with workfront < 70%:\n\n"
-            low_wf_sorted = sorted(low_workfront, key=lambda x: x.workfrontPct)
-            response += "| Activity | Workfront % | Ready/Total Tasks | Delay |\n"
-            response += "|----------|-------------|-------------------|-------|\n"
-            for act in low_wf_sorted[:10]:
-                response += f"| {act.activityDescription} | {act.workfrontPct:.1f}% | {act.readyTasks}/{act.totalTasks} | {act.delayDays}d |\n"
+        # Workfront Not Ready Activities
+        response += "⚠️ Workfront Not Ready\n\n"
+        not_workfront_ready = [a for a in activities if (a.workfrontReadyPct or 0) < 70]
+        if not_workfront_ready:
+            response += f"Found **{len(not_workfront_ready)}** activities with low workfront readiness:\n\n"
+            response += "| Activity | Category | Critical | Planned % | Actual % |\n"
+            response += "|----------|----------|----------|-----------|----------|\n"
+            for act in not_workfront_ready[:10]:
+                cat = act.domainCode or act.domain or "—"
+                crit = "⚠️ Yes" if act.isCriticalWrench else "No"
+                planned = f"{act.plannedProgressPct:.1f}%" if act.plannedProgressPct is not None else "—"
+                actual = f"{act.actualProgressPct:.1f}%" if act.actualProgressPct is not None else "—"
+                response += f"| {act.activityDescription} | {cat} | {crit} | {planned} | {actual} |\n"
         else:
-            response += "✅ All activities have adequate workfront readiness.\n"
+            response += "✅ All activities have workfront available.\n"
         
         response += "\n---\n\n"
         
         # Summary Statistics
         response += "### 📈 Summary Statistics\n\n"
-        avg_workfront = sum(a.workfrontPct for a in activities) / len(activities)
-        avg_delay = sum(a.delayDays for a in activities) / len(activities)
-        total_ready = sum(a.readyTasks for a in activities)
-        total_tasks = sum(a.totalTasks for a in activities)
+        all_delays = [_get_delay(a) for a in activities]
+        avg_delay = sum(all_delays) / len(all_delays) if all_delays else 0
+        wf_ready_count = sum(1 for a in activities if (a.workfrontReadyPct or 0) >= 70)
+        wf_pct = (wf_ready_count / len(activities) * 100) if activities else 0
+        critical_count = sum(1 for a in activities if a.isCriticalWrench)
         
         response += f"- **Total Activities**: {len(activities)}\n"
         response += f"- **Delayed Activities**: {len(delayed_activities)}\n"
-        response += f"- **Avg Workfront**: {avg_workfront:.1f}%\n"
+        response += f"- **Workfront Ready**: {wf_ready_count}/{len(activities)} ({wf_pct:.0f}%)\n"
         response += f"- **Avg Delay**: {avg_delay:.1f} days\n"
-        response += f"- **Ready/Total Tasks**: {total_ready}/{total_tasks}\n\n"
+        response += f"- **Critical Tasks**: {critical_count}\n\n"
         
         # Root Cause Indicators
         response += "### 🎯 Potential Root Causes\n\n"
-        if avg_workfront < 70:
-            response += f"- ❌ **Workfront Constraint**: Avg {avg_workfront:.1f}% — material/ROW/access issues\n"
+        if wf_pct < 70:
+            response += f"- ❌ **Workfront Constraint**: Only {wf_pct:.0f}% ready — material/ROW/access issues\n"
         if len(delayed_activities) > len(activities) * 0.5:
             response += f"- ❌ **Widespread Delays**: {len(delayed_activities)}/{len(activities)} activities delayed\n"
-        if project_summary.spi < 0.95:
-            response += f"- ❌ **Schedule Performance**: SPI {project_summary.spi:.4f} — execution behind plan\n"
-        if avg_workfront >= 70 and project_summary.spi >= 0.95:
+        if project_summary.spiOverall < 0.95:
+            response += f"- ❌ **Schedule Performance**: SPI {project_summary.spiOverall:.4f} — execution behind plan\n"
+        if wf_pct >= 70 and project_summary.spiOverall >= 0.95:
             response += "- ✅ No major systemic issues. Consider activity-level interventions.\n"
         
         response += "\n💬 *Would you like me to suggest recovery options to bring this project back on track?*"
@@ -566,19 +514,22 @@ async def sra_recovery_advise(
         
         # Get activity-level data for workfront info
         activities = await prisma.tbl02projectactivity.find_many(
-            where={"projectKey": project_key_int}
+            where={
+                "projectKey": project_key_int
+            }
         )
         
-        # Compute average workfront from activity table
-        avg_workfront = sum(a.workfrontPct for a in activities) / len(activities) if activities else 0
+        # Compute workfront readiness from percentage field
+        wf_ready_count = sum(1 for a in activities if (a.workfrontReadyPct or 0) >= 70) if activities else 0
+        wf_pct = (wf_ready_count / len(activities) * 100) if activities else 0
         
         response = f"## 🔧 Recovery Advice for {project_summary.projectDescription}\n\n"
         response += f"**Current Status:**\n"
-        response += f"- 📊 PEI: {project_summary.pei:.4f}\n"
-        response += f"- 📈 SPI: {project_summary.spi:.4f}\n"
-        response += f"- ⏰ Forecast Delay: {project_summary.forecastDelayDays} days\n"
-        response += f"- 🏗️ Avg Workfront (from activities): {avg_workfront:.1f}%\n"
-        response += f"- 📐 Lookahead Compliance: {project_summary.lookAheadCompliancePercent:.1f}%\n\n"
+        response += f"- 📊 PEI: {project_summary.projectExecutionIndex:.4f}\n"
+        response += f"- 📈 SPI: {project_summary.spiOverall:.4f}\n"
+        response += f"- ⏰ Forecast Delay: {project_summary.maxForecastDelayDaysOverall} days\n"
+        response += f"- 🏗️ Workfront Ready: {wf_ready_count}/{len(activities)} ({wf_pct:.0f}%)\n"
+        response += f"- 📐 Construction LAC: {project_summary.conLacWeekPct:.1f}%\n\n"
         
         response += "---\n\n### 💡 Recovery Options:\n\n"
         
@@ -613,13 +564,13 @@ async def sra_recovery_advise(
         response += "- Risk: High (increased coordination needed)\n\n"
         
         # Option 5: Workfront Resolution (if applicable)
-        if avg_workfront < 70:
+        if wf_pct < 70:
             response += "**Option 5: Workfront Resolution** 🚧\n"
-            response += f"- Current avg workfront readiness is only {avg_workfront:.1f}%\n"
+            response += f"- Only {wf_pct:.0f}% workfronts are ready\n"
             if activities:
-                low_wf = [a for a in activities if a.workfrontPct < 70]
-                if low_wf:
-                    response += f"- {len(low_wf)}/{len(activities)} activities have workfront < 70%\n"
+                not_ready = [a for a in activities if (a.workfrontReadyPct or 0) < 70]
+                if not_ready:
+                    response += f"- {len(not_ready)}/{len(activities)} activities have workfront not available\n"
             response += "- Clear material/ROW/access constraints\n"
             response += "- Coordinate with procurement/land teams\n"
             response += "- Estimated schedule recovery: 5-10 days\n"
@@ -703,8 +654,8 @@ async def sra_simulate(
             return f"No data found for project_key {project_key}."
         
         # Simulation logic (simplified model)
-        current_delay = project_summary.forecastDelayDays
-        current_spi = project_summary.spi
+        current_delay = project_summary.maxForecastDelayDaysOverall
+        current_spi = project_summary.spiOverall
         
         # Calculate simulated impact based on resource type
         productivity_factor = 0.0
@@ -859,9 +810,9 @@ async def sra_create_action(
         response += "---\n\n"
         response += "### 📊 Current Project Context:\n"
         if project_summary:
-            response += f"- PEI: {project_summary.pei:.4f}\n"
-            response += f"- Forecast Delay: {project_summary.forecastDelayDays} days\n"
-            response += f"- SPI: {project_summary.spi:.4f}\n\n"
+            response += f"- PEI: {project_summary.projectExecutionIndex:.4f}\n"
+            response += f"- Forecast Delay: {project_summary.maxForecastDelayDaysOverall} days\n"
+            response += f"- SPI: {project_summary.spiOverall:.4f}\n\n"
         
         response += "💡 **Note**: This action has been logged for tracking. The assigned user will receive a notification."
         
@@ -926,11 +877,11 @@ async def sra_explain_formula(
         response += "| SPI < 1.0 | 🔴 Behind | Project is behind schedule |\n\n"
         
         if project_context:
-            response += f"**Current Value**: {project_context.spi:.4f} "
-            if project_context.spi >= 1.0:
+            response += f"**Current Value**: {project_context.spiOverall:.4f} "
+            if project_context.spiOverall >= 1.0:
                 response += "✅ (On/Ahead of schedule)\n\n"
             else:
-                response += f"⚠️ (Behind by {(1 - project_context.spi) * 100:.1f}%)\n\n"
+                response += f"⚠️ (Behind by {(1 - project_context.spiOverall) * 100:.1f}%)\n\n"
     
     # CPI Explanation
     # if metric_lower in ['cpi', 'all', 'cost']:
@@ -957,11 +908,11 @@ async def sra_explain_formula(
         response += "| PEI > 1.0 | 🔴 Less Efficient | Taking more time than planned |\n\n"
         
         if project_context:
-            response += f"**Current Value**: {project_context.pei:.4f} "
-            if project_context.pei <= 1.0:
+            response += f"**Current Value**: {project_context.projectExecutionIndex:.4f} "
+            if project_context.projectExecutionIndex <= 1.0:
                 response += "🟢 (Efficient — on or ahead of schedule)\n\n"
             else:
-                response += f"🔴 (Taking {(project_context.pei - 1) * 100:.1f}% more time than planned)\n\n"
+                response += f"🔴 (Taking {(project_context.projectExecutionIndex - 1) * 100:.1f}% more time than planned)\n\n"
     
     # Lookahead Compliance
     # if metric_lower in ['lookahead', 'compliance', 'all']:

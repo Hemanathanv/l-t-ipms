@@ -94,65 +94,209 @@ model Session {
 
 
 
-// tbl_01_Project_summary - Project-level summary metrics
 model Tbl01ProjectSummary {
-  id                           Int      @id @default(autoincrement())
-  project_id                   String   @map("project_id")
-  projectKey                   Int      @map("project_key")
-  startDate                    DateTime @map("start_date")
-  endDate                      DateTime @map("end_date")
-  projectDescription           String   @map("project_description")
-  projectLocation              String   @map("project_location")
-  pei                          Float
-  spi                          Float
-  forecastDelayDays            Int      @map("forecast_delay_days")
-  computedDays                 Int      @map("computed_days")
-  extensionExposureDays        Int      @map("extension_exposure_days")
-  workfrontPercentage          Float    @map("workfront_percentage")
-  readyTask                    Int      @map("ready_task")
-  workfrontTotalTasks          Int      @map("workfront_total_tasks")
-  criticalPercentage           Float    @map("critical_percentage")
-  criticalYesCount             Int      @map("critical_yes_count")
-  criticalNoCount              Int      @map("critical_no_count")
-  criticalTotalTasks           Int      @map("critical_total_tasks")
-  executedQuantity             Float    @map("executed_quantity")
-  totalAvailableQuantity       Float    @map("total_available_quantity")
-  executableProgressPercent    Float    @map("executable_progress_percent")
-  tasksPlannedInLookAhead      Int      @map("tasks_planned_in_lookahead")
-  tasksCompletedLookAhead      Int      @map("tasks_completed_lookahead")
-  lookAheadCompliancePercent   Float    @map("look_ahead_compliance_percent")
-  createdAt                    DateTime @default(now()) @map("created_at")
-
-  @@index([project_id])
+ 
+  id   Int @id @default(autoincrement())
+ 
+ 
+  projectKey         Int    @map("project_key")
+  projectId          String @map("project_id")
+  projectDescription String @map("project_description")
+  projectLocation    String @map("project_location")
+ 
+  baselineStartDate         DateTime  @map("baseline_start_date")
+  baselineFinishDate        DateTime  @map("baseline_finish_date")
+  forecastStartDate         DateTime? @map("forecast_start_date")
+  forecastFinishDate        DateTime? @map("forecast_finish_date")
+  actualStartDate           DateTime? @map("actual_start_date")       // NEW-2
+  contractualEndDate        DateTime  @map("contractual_end_date")
+ 
+  baselineDurationDays      Int       @map("baseline_duration_days")
+  forecastDurationDays      Int       @map("forecast_duration_days")
+  adjustedTotalDurationDays Int       @map("adjusted_total_duration_days") // forecast_finish - baseline_start
+ 
+  slipDays               Int @map("slip_days")                   // +ve = slipped  |  -ve = early
+  scheduleVarianceDays   Int @map("schedule_variance_days")      // inverse of slip_days
+ 
+  projectExecutionIndex  Float @map("project_execution_index")   // PEI = forecast_duration / baseline_duration
+ 
+  eotExposureDays Int @map("eot_exposure_days")                  // Max WBS delay on S Curve 1
+ 
+  
+  // SPI (S Curve actual / planned cumulative ratio)
+  spiOverall       Float @map("spi_overall")
+  spiEngineering   Float @map("spi_engineering")
+  spiProcurement   Float @map("spi_procurement")
+  spiConstruction  Float @map("spi_construction")
+ 
+  
+  cumulativePlannedOverall  Float @map("cumulative_planned_overall")
+  cumulativeActualOverall   Float @map("cumulative_actual_overall")
+  cumulativeBacklogOverall  Float @map("cumulative_backlog_overall")
+ 
+  
+  cumulativePlannedEngineering  Float @map("cumulative_planned_engineering")
+  cumulativeActualEngineering   Float @map("cumulative_actual_engineering")
+  cumulativeBacklogEngineering  Float @map("cumulative_backlog_engineering")
+ 
+  
+  cumulativePlannedProcurement  Float @map("cumulative_planned_procurement")
+  cumulativeActualProcurement   Float @map("cumulative_actual_procurement")
+  cumulativeBacklogProcurement  Float @map("cumulative_backlog_procurement")
+ 
+  
+  cumulativePlannedConstruction  Float @map("cumulative_planned_construction")
+  cumulativeActualConstruction   Float @map("cumulative_actual_construction")
+  cumulativeBacklogConstruction  Float @map("cumulative_backlog_construction")
+ 
+  // CPM network delay (from WBS_Data Delay_Days_Based_on_Plan_Forecast_Finish)
+  maxForecastDelayDaysOverall       Int @map("max_forecast_delay_days_overall")
+  maxForecastDelayDaysEngineering   Int @map("max_forecast_delay_days_engineering")
+  maxForecastDelayDaysProcurement   Int @map("max_forecast_delay_days_procurement")
+  maxForecastDelayDaysConstruction  Int @map("max_forecast_delay_days_construction")
+ 
+  
+  floatTotalTaskCount       Int   @map("float_total_task_count")
+  floatNegativeTaskCount    Int   @map("float_negative_task_count")    // float < 0
+  floatZeroTaskCount        Int   @map("float_zero_task_count")        // float = 0 (on critical path)
+  floatNearCriticalCount    Int   @map("float_near_critical_count")    // float 15 days
+  floatPositiveTaskCount    Int   @map("float_positive_task_count")    // float > near_crit threshold
+  floatAvgDays              Float @map("float_avg_days")
+  floatMinDays              Int   @map("float_min_days")               // tightest float in project
+  floatAtRiskPct            Float @map("float_at_risk_pct")            // % tasks with float d 0
+ 
+  
+  cadOverallPct       Float @map("cad_overall_pct")
+  cadEngineeringPct   Float @map("cad_engineering_pct")
+  cadProcurementPct   Float @map("cad_procurement_pct")
+  cadConstructionPct  Float @map("cad_construction_pct")
+ 
+  
+  wrOverallPct       Float @map("wr_overall_pct")
+  wrEngineeringPct   Float @map("wr_engineering_pct")
+  wrProcurementPct   Float @map("wr_procurement_pct")
+  wrConstructionPct  Float @map("wr_construction_pct")
+ 
+  
+  epOverallPct       Float @map("ep_overall_pct")
+  epEngineeringPct   Float @map("ep_engineering_pct")
+  epProcurementPct   Float @map("ep_procurement_pct")
+  epConstructionPct  Float @map("ep_construction_pct")
+ 
+  contributionOverallPct       Float @map("contribution_overall_pct")
+  contributionEngineeringPct   Float @map("contribution_engineering_pct")
+  contributionProcurementPct   Float @map("contribution_procurement_pct")
+  contributionConstructionPct  Float @map("contribution_construction_pct")
+ 
+  
+  activitiesTotalCount      Int @map("activities_total_count")
+  activitiesCompleteCount   Int @map("activities_complete_count")
+  activitiesInProgressCount Int @map("activities_in_progress_count")
+  activitiesOverdueCount    Int @map("activities_overdue_count")
+  activitiesNotYetDueCount  Int @map("activities_not_yet_due_count")
+ 
+  
+  conLacWeekPct          Float @map("con_lac_week_pct")
+  conLacMonthPct         Float @map("con_lac_month_pct")
+  conLacCompletedRules   Int   @map("con_lac_completed_rules")
+  conLacOverdueCount     Int   @map("con_lac_overdue_count")
+  conLacAtRisk7DayCount  Int   @map("con_lac_at_risk_7day_count")
+  conLacAtRisk30DayCount Int   @map("con_lac_at_risk_30day_count")
+  conLacPendingCount     Int   @map("con_lac_pending_count")
+ 
+  
+  prcLacWeekPct          Float @map("prc_lac_week_pct")
+  prcLacMonthPct         Float @map("prc_lac_month_pct")
+  prcLacCompletedRules   Int   @map("prc_lac_completed_rules")
+  prcLacOverdueCount     Int   @map("prc_lac_overdue_count")
+  
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+ 
+  
   @@index([projectKey])
-  @@map("tbl_01_Project_summary")
+  @@index([projectId])
+  @@map("tbl_01_project_summary")
 }
+ 
+ model Tbl02ProjectActivity {
+  id                       Int      @id @default(autoincrement())
+  projectKey              Int      @map("project_key")
+  activityCode            String   @map("activity_code")
+  activityDescription     String   @map("activity_description")
+  domain                  String?  @map("domain")
+  domainCode              String?  @map("domain_code")
+  customScurve            String?  @map("scurve")
+  baselineStartDate       DateTime? @map("baseline_start_date")
+  baselineFinishDate      DateTime? @map("baseline_finish_date")
+  forecastStartDate       DateTime? @map("forecast_start_date")
+  forecastFinishDate      DateTime? @map("forecast_finish_date")
+  actualStartDate         DateTime? @map("actual_start_date")
+  actualFinishDate        DateTime? @map("actual_finish_date")
+  
+  baselineDurationDays    Int?     @map("baseline_duration_days")
+  forecastDurationDays    Int?     @map("forecast_duration_days")
+  adjustedTotalDurationDays Int?   @map("adjusted_total_duration_days")
+  slipDays                Int?     @map("slip_days")
+  scheduleVarianceDays    Int?     @map("schedule_variance_days")
+  
+  activityStatus          String?  @map("activity_status")
+  
+  totalFloat              Float?   @map("total_float")
+  isCriticalWrench        Boolean? @map("is_critical_wrench")
+  projectMinFloatDays     Int?     @map("project_min_float_days")
+  isControllingFloat      Boolean? @map("is_controlling_float")
+  floatHealthStatus       String?  @map("float_health_status")
+  floatHealthSortOrder    Int?     @map("float_health_sort_order")
+  
+  criticalActivityDensityPct Float? @map("critical_activity_density_pct")
+  workfrontReadyPct        Float? @map("workfront_ready_pct")
+  plannedProgressPct       Float? @map("planned_progress_pct")
+  actualProgressPct        Float? @map("actual_progress_pct")
+  forecastProgressPct      Float? @map("forecast_progress_pct")
+  progressVariancePct      Float? @map("progress_variance_pct")
+  
+  plannedQuantity         Float?  @map("planned_quantity")
+  earnedQuantity          Float?  @map("earned_quantity")
+  executableProgressPct   Float?  @map("executable_progress_pct")
+  
+  contributionToProjectPct Float? @map("contribution_to_project_pct")
+  activitySpi             Float?  @map("activity_spi")
+  
+  forecastDelayDays       Int?    @map("forecast_delay_days")
+  
+  cumulativePlannedProgress Float? @map("cumulative_planned_progress")
+  cumulativeActualProgress  Float? @map("cumulative_actual_progress")
+  cumulativeBacklogPct     Float? @map("cumulative_backlog_pct")
+  domainSpi               Float?  @map("domain_spi")
+  
+  conTotalRules           Int?    @map("con_total_rules")
+  conCompletedRules       Int?    @map("con_completed_rules")
+  conOverdueRules         Int?    @map("con_overdue_rules")
+  conAtRiskRules7Day      Int?    @map("con_at_risk_rules_7day")
+  conAtRiskRules30Day     Int?    @map("con_at_risk_rules_30day")
+  conPendingRules         Int?    @map("con_pending_rules")
+  conLacWeekPct           Float?  @map("con_lac_week_pct")
+  conLacMonthPct          Float?  @map("con_lac_month_pct")
+  
+  prcTotalRules           Int?    @map("prc_total_rules")
+  prcCompletedRules       Int?    @map("prc_completed_rules")
+  prcOverdueRules         Int?    @map("prc_overdue_rules")
+  prcAtRiskRules7Day      Int?    @map("prc_at_risk_rules_7day")
+  prcAtRiskRules30Day     Int?    @map("prc_at_risk_rules_30day")
+  prcPendingRules         Int?    @map("prc_pending_rules")
+  prcLacWeekPct           Float?  @map("prc_lac_week_pct")
+  prcLacMonthPct          Float?  @map("prc_lac_month_pct")
 
-// tbl_02_ProjectActivity - Project activity-level data
-model Tbl02ProjectActivity {
-  id                           Int       @id @default(autoincrement())
-  projectKey                   Int       @map("project_key")
-  activityCode                 String    @map("activity_code")
-  activityDescription          String    @map("activity_description")
-  workfrontPct                 Float     @map("workfront_pct")
-  readyTasks                   Int       @map("ready_tasks")
-  totalTasks                   Int       @map("total_tasks")
-  criticalPercentage           Float     @map("critical_percentage")
-  tasksPlannedInLookAhead      Int       @map("tasks_planned_in_lookahead")
-  tasksCompleted               Int       @map("tasks_completed")
-  lookAheadCompliancePercent   Float     @map("look_ahead_compliance_percent")
-  delayDays                    Int       @map("delay_days")
-  computedDelay                Int       @map("computed_delay")
-  taskActualStartDate          DateTime? @map("task_actual_start_date")
-  taskActualFinishDate         DateTime? @map("task_actual_finish_date")
-  taskForecastStartDate        DateTime? @map("task_forecast_start_date")
-  taskForecastFinishDate       DateTime? @map("task_forecast_finish_date")
-  taskPlanStartDate            DateTime? @map("task_plan_start_date")
-  taskPlanFinishDate           DateTime? @map("task_plan_finish_date")
-  taskKey                      String    @map("task_key")
-  createdAt                    DateTime  @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
 
   @@index([projectKey])
   @@index([activityCode])
-  @@map("tbl_02_ProjectActivity")
+  @@index([projectKey, domainCode])
+  @@index([projectKey, totalFloat])
+  @@index([projectKey, forecastDelayDays])
+
+  @@map("tbl_project_activity")
 }

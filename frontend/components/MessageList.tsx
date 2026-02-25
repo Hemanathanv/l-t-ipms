@@ -213,6 +213,7 @@ export function MessageList({
                                         onCopy={handleCopy}
                                         onEdit={onEditMessage ? handleEditStart : undefined}
                                         onFeedback={onFeedback}
+                                        onSwitchBranch={onSwitchBranch}
                                     />
                                 )}
                             </div>

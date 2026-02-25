@@ -159,8 +159,19 @@ async def get_conversation(thread_id: str):
         )
         
         if conversation and conversation.messages:
-            # Sort messages by createdAt in Python (Prisma Python doesn't support order in includes)
-            sorted_messages = sorted(conversation.messages, key=lambda m: m.createdAt or datetime.min)
+            all_messages = conversation.messages
+
+            # Compute total branches per position
+            branch_counts = {}
+            for msg in all_messages:
+                pos = msg.positionIndex
+                if pos is not None:
+                    branch_counts[pos] = branch_counts.get(pos, 0) + 1
+
+            # Filter to active branch only and sort
+            active_messages = [m for m in all_messages if m.activeBranch]
+            sorted_messages = sorted(active_messages, key=lambda m: (m.positionIndex or 0, m.createdAt or datetime.min))
+
             messages = [
                 {
                     "id": msg.id,
@@ -168,6 +179,9 @@ async def get_conversation(thread_id: str):
                     "content": msg.content,
                     "created_at": msg.createdAt.isoformat() if msg.createdAt else None,
                     "feedback": msg.feedback,
+                    "position_index": msg.positionIndex,
+                    "branch_index": msg.branchIndex,
+                    "total_branches": branch_counts.get(msg.positionIndex, 1),
                 }
                 for msg in sorted_messages
             ]
