@@ -3,7 +3,24 @@
 import { useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import html2canvas from 'html2canvas';
 import { Message } from '@/lib/types';
+
+// Avatar icons from public/ (root)
+const AVATAR_USER = '/human.svg';
+const AVATAR_BOT = '/bot.svg';
+
+// Dynamic AI sphere / bubble for insight loading (rotating + subtle wave)
+function InsightLoadingSphere() {
+    return (
+        <div className="insight-loading-wrap" aria-hidden>
+            <div className="insight-sphere">
+                <div className="insight-sphere-inner" />
+            </div>
+            <span className="insight-loading-label">Preparing insight…</span>
+        </div>
+    );
+}
 
 interface MessageListProps {
     messages: Message[];
@@ -131,9 +148,13 @@ function ThinkingIndicator({ isThinking, thinkingContent }: { isThinking: boolea
                     {'\u203A'}
                 </span>
             </button>
-            {isExpanded && thinkingContent && (
+            {isExpanded && (
                 <div className="thinking-content">
-                    <MarkdownContent content={thinkingContent} />
+                    {isThinking ? (
+                        <p className="thinking-placeholder">Processing…</p>
+                    ) : (
+                        thinkingContent && <MarkdownContent content={thinkingContent} />
+                    )}
                 </div>
             )}
         </div>
@@ -154,7 +175,9 @@ function AssistantContent({ content }: { content: string }) {
                 <MarkdownContent content={dataPart} />
                 <div className="ai-insight-card">
                     <div className="ai-insight-header">
-                        <span className="ai-insight-icon" aria-hidden>💡</span>
+                        <span className="ai-insight-icon" aria-hidden>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3l1.5 3 3 .5-2 2.5.5 3L12 11l-2.5 1.5.5-3-2-2.5 3-.5L12 3z"/></svg>
+                        </span>
                         <span>AI Insight</span>
                     </div>
                     <div className="ai-insight-body">
@@ -194,6 +217,40 @@ export function MessageList({
         navigator.clipboard.writeText(content);
     };
 
+    const handleCopyImage = async (element: HTMLElement): Promise<boolean> => {
+        try {
+            const canvas = await html2canvas(element, {
+                useCORS: true,
+                scale: 2,
+                logging: false,
+                backgroundColor: '#f7f7f7',
+                ignoreElements: (el) => el.classList.contains('message-actions'),
+            });
+            const blob = await new Promise<Blob | null>((resolve) => {
+                canvas.toBlob(resolve, 'image/png', 1);
+            });
+            if (!blob) return false;
+            if (navigator.clipboard?.write) {
+                try {
+                    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                    return true;
+                } catch {
+                    // Fall through to download fallback
+                }
+            }
+            // Fallback: download the image so user can save it
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'message-screenshot.png';
+            a.click();
+            URL.revokeObjectURL(url);
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
     const handleEditStart = (id: string, content: string) => {
         setEditingId(id);
         setEditContent(content);
@@ -216,9 +273,11 @@ export function MessageList({
             <div className="messages-wrapper">
                 {messages.length === 0 && !isStreaming && (
                     <div className="welcome-message">
-                        <div className="welcome-icon">{'\uD83E\uDD16'}</div>
-                        <h2>Welcome to L&T IPMS Assistant</h2>
-                        <p>Ask me anything about your projects, metrics, or get help with project management tasks.</p>
+                        <div className="welcome-icon">
+                            <img src={AVATAR_BOT} alt="" aria-hidden />
+                        </div>
+                        <h2>Experience smarter conversations</h2>
+                        <p>Ask about your projects, metrics, deadlines, or get help with project management—powered by AI.</p>
                     </div>
                 )}
 
@@ -227,9 +286,9 @@ export function MessageList({
                     const isEditing = editingId === messageKey;
 
                     return (
-                        <div key={index} className={`message ${message.role}`}>
+                        <div key={index} className={`message ${message.role} message-enter`}>
                             <div className="message-avatar">
-                                {message.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16'}
+                                <img src={message.role === 'user' ? AVATAR_USER : AVATAR_BOT} alt={message.role === 'user' ? 'User' : 'Assistant'} />
                             </div>
                             <div className="message-body">
                                 <div className={`message-content${message.role === 'assistant' ? ' prose-chat' : ''}`}>
@@ -263,6 +322,7 @@ export function MessageList({
                                         message={message}
                                         messageIndex={index}
                                         onCopy={handleCopy}
+                                        onCopyImage={handleCopyImage}
                                         onEdit={onEditMessage ? handleEditStart : undefined}
                                         onFeedback={onFeedback}
                                         onSwitchBranch={onSwitchBranch}
@@ -274,43 +334,49 @@ export function MessageList({
                 })}
 
                 {isStreaming && (
-                    <div className="message assistant streaming">
-                        <div className="message-avatar">{'\uD83E\uDD16'}</div>
-                        <div className="message-content prose-chat">
-                            {/* Thinking indicator - ChatGPT style */}
-                            <ThinkingIndicator isThinking={isThinking} thinkingContent={thinkingContent} />
+                    <div className="message assistant streaming message-enter">
+                        <div className="message-avatar">
+                            <img src={AVATAR_BOT} alt="Assistant" />
+                        </div>
+                        <div className="message-body">
+                            <div className="message-content prose-chat">
+                                {/* Thinking indicator — generic label; no specific details while thinking */}
+                                <ThinkingIndicator isThinking={isThinking} thinkingContent={thinkingContent} />
 
-                            {/* Tool call indicator */}
-                            {currentToolCall && (
-                                <div className="tool-call-indicator">
-                                    <span className="tool-spinner">{'\u2699\uFE0F'}</span>
-                                    <span>Calling {formatToolName(currentToolCall)}...</span>
-                                </div>
-                            )}
+                                {/* Tool call indicator */}
+                                {currentToolCall && (
+                                    <div className="tool-call-indicator">
+                                        <span className="tool-spinner" aria-hidden>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                        </span>
+                                        <span>Calling {formatToolName(currentToolCall)}…</span>
+                                    </div>
+                                )}
 
-                            {/* Tool output as plain markdown */}
-                            {toolOutput && <MarkdownContent content={toolOutput} />}
+                                {/* Tool output as plain markdown (outside insight card) */}
+                                {toolOutput && <MarkdownContent content={toolOutput} />}
 
-                            {/* Streaming content — in blue card if insight, else plain */}
-                            {streamingContent && (
-                                isInsight ? (
-                                    <div className="ai-insight-card">
+                                {/* AI Insight: while filling, show only dynamic sphere — no content inside card until done */}
+                                {isInsight ? (
+                                    <div className="ai-insight-card ai-insight-loading">
                                         <div className="ai-insight-header">
-                                            <span className="ai-insight-icon" aria-hidden>💡</span>
+                                            <span className="ai-insight-icon" aria-hidden>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3l1.5 3 3 .5-2 2.5.5 3L12 11l-2.5 1.5.5-3-2-2.5 3-.5L12 3z"/></svg>
+                                            </span>
                                             <span>AI Insight</span>
                                         </div>
                                         <div className="ai-insight-body">
-                                            <MarkdownContent content={streamingContent} />
+                                            <InsightLoadingSphere />
                                         </div>
                                     </div>
-                                ) : (
+                                ) : streamingContent ? (
                                     <MarkdownContent content={streamingContent} />
-                                )
+                                ) : null}
+                            </div>
+                            {!currentToolCall && !isThinking && streamingContent && !isInsight && (
+                                <span className="streaming-cursor" aria-hidden />
                             )}
                         </div>
-                        {!currentToolCall && !isThinking && streamingContent && (
-                            <div className="streaming-cursor">{'\u2588'}</div>
-                        )}
                     </div>
                 )}
             </div>

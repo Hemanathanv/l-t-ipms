@@ -194,9 +194,11 @@ async def sra_status_pei(
         # --- OVERALL % and DELAY DAYS ---
         response += f"📊 **Overall Progress**: Planned {cumulative_planned:.1f}% · Actual {cumulative_actual:.1f}%  ·  "
         response += f"**Forecast Delay**: {forecast_delay_days or 0} days\n\n"
-        # Max Forecast Delay (days) by E/P/C/Overall — always show in chat (use — when null)
+        # Delay Days — show overall delay days
         def _d(v):
             return f"{v}d" if v is not None else "—"
+        overall_days = delay_overall if delay_overall is not None else 0
+        response += f"**Delay Days (Overall)**: {overall_days} days\n\n"
         response += f"📅 **Max Forecast Delay (days)** │ **E** {_d(delay_eng)} · **P** {_d(delay_proc)} · **C** {_d(delay_const)} · **Overall** {_d(delay_overall)}\n\n"
         if primary_reason and status == "At Risk":
             response += f"⚠️ *{primary_reason}*\n\n"
@@ -253,8 +255,8 @@ async def sra_status_pei(
         spi_meaning = "On schedule" if spi_value >= 1.0 else f"Behind {(1 - spi_value) * 100:.0f}%"
         pei_meaning = "Efficient" if pei_value <= 1.0 else f"{(pei_value - 1) * 100:.0f}% over"
         
-        response += "| Schedule Index | Value | Status | | EPC Category | Planned % | Actual % | Delay |\n"
-        response += "|---------------|-------|--------|-|--------------|-----------|----------|-------|\n"
+        response += "| Schedule Index | Value | Status | | EPC Category | Planned % | Actual % | Delay (days) |\n"
+        response += "|---------------|-------|--------|-|--------------|-----------|----------|---------------|\n"
         
         # Row 1: SPI | E
         e = epc_rows[0]
@@ -267,6 +269,10 @@ async def sra_status_pei(
         # Row 3: (empty left) | C
         c = epc_rows[2]
         response += f"| | | | | {c['icon']} **C** ({c['tasks']}) | {c['planned']:.1f}% | {c['actual']:.1f}% | {c['delay']:.0f}d |\n"
+        
+        # Row 4: Overall delay days
+        overall_d = delay_overall if delay_overall is not None else 0
+        response += f"| | | | | **Overall** | — | — | **{overall_d}d** |\n"
         
         response += "\n"
         

@@ -1,21 +1,24 @@
 'use client';
 
-import { useState } from 'react';
-import { Copy, Check, Pencil, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Copy, Check, Pencil, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, Image } from 'lucide-react';
 import { Message } from '@/lib/types';
 
 interface MessageActionsProps {
     message: Message;
     messageIndex?: number;
     onCopy: (content: string) => void;
+    onCopyImage?: (element: HTMLElement) => Promise<boolean>;
     onEdit?: (messageId: string, newContent: string) => void;
     onFeedback?: (messageId: string, feedback: 'positive' | 'negative') => void;
     onSwitchBranch?: (messageId: string, branchIndex: number) => void;
 }
 
-export function MessageActions({ message, messageIndex, onCopy, onEdit, onFeedback, onSwitchBranch }: MessageActionsProps) {
+export function MessageActions({ message, messageIndex, onCopy, onCopyImage, onEdit, onFeedback, onSwitchBranch }: MessageActionsProps) {
     const isUser = message.role === 'user';
     const [copied, setCopied] = useState(false);
+    const [copyImageDone, setCopyImageDone] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     // Use message.id if available, otherwise use index as fallback
     const messageKey = message.id || `msg-${messageIndex}`;
@@ -31,6 +34,16 @@ export function MessageActions({ message, messageIndex, onCopy, onEdit, onFeedba
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const handleCopyImage = async () => {
+        const messageEl = containerRef.current?.closest('.message') as HTMLElement | null;
+        if (!messageEl || !onCopyImage) return;
+        const ok = await onCopyImage(messageEl);
+        if (ok) {
+            setCopyImageDone(true);
+            setTimeout(() => setCopyImageDone(false), 2000);
+        }
+    };
+
     const handlePrevBranch = () => {
         if (message.id && onSwitchBranch && (message.branch_index ?? 0) > 0) {
             onSwitchBranch(message.id, (message.branch_index ?? 0) - 1);
@@ -44,17 +57,27 @@ export function MessageActions({ message, messageIndex, onCopy, onEdit, onFeedba
     };
 
     return (
-        <div className={`message-actions ${isUser ? 'user-actions' : 'assistant-actions'}`}>
+        <div ref={containerRef} className={`message-actions ${isUser ? 'user-actions' : 'assistant-actions'}`}>
             {/* Assistant message actions - ChatGPT style */}
             {!isUser && (
                 <>
                     <button
                         className="action-btn"
                         onClick={handleCopy}
-                        title="Copy"
+                        title="Copy text"
                     >
                         {copied ? <Check size={16} /> : <Copy size={16} />}
                     </button>
+
+                    {onCopyImage && (
+                        <button
+                            className="action-btn"
+                            onClick={handleCopyImage}
+                            title="Copy image"
+                        >
+                            {copyImageDone ? <Check size={16} /> : <Image size={16} />}
+                        </button>
+                    )}
 
                     {onFeedback && (
                         <>
@@ -84,10 +107,20 @@ export function MessageActions({ message, messageIndex, onCopy, onEdit, onFeedba
                     <button
                         className="action-btn"
                         onClick={handleCopy}
-                        title="Copy"
+                        title="Copy text"
                     >
                         {copied ? <Check size={16} /> : <Copy size={16} />}
                     </button>
+
+                    {onCopyImage && (
+                        <button
+                            className="action-btn"
+                            onClick={handleCopyImage}
+                            title="Copy image"
+                        >
+                            {copyImageDone ? <Check size={16} /> : <Image size={16} />}
+                        </button>
+                    )}
 
                     {onEdit && (
                         <button
