@@ -32,13 +32,18 @@ def get_llm() -> ChatOpenAI:
     #     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
     # )
 
+    # Use config so .env BASE_URL / LLM_MODEL are used (e.g. Ollama at 192.168.1.20:11434)
+    base_url = settings.BASE_URL.rstrip("/") + "/v1"
+    # (connect_timeout, read_timeout): long connect for slow networks, long read for LLM
+    timeout = (60.0, 300.0)
     return ChatOpenAI(
-        model="qwen3-8b",
-        openai_api_key="06bec33a36ee70a637f3e385666d0e1210a2b893681de1c7c5d42fbcbccbcfd8",
-        base_url="http://192.168.10.100:5454/v1",
+        model=settings.LLM_MODEL,
+        base_url=base_url,
+        openai_api_key=settings.OPENAI_API_KEY or "ollama",
+        timeout=timeout,
         model_kwargs={
             "stream_options": {"include_usage": True}
-        }  # Disable streaming - required for vLLM tool calls
+        },
     )
 
     # return ChatOpenAI(

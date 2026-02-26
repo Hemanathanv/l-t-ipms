@@ -141,14 +141,14 @@ async def get_projects(token: Optional[str] = Depends(get_session_token)):
     if(await validate_token(token) == False):
         raise HTTPException(status_code=401, detail="Not authenticated")
     prisma = await get_prisma()
-    
+
     try:
         # Get distinct projects from project summary table
         all_projects = await prisma.tbl01projectsummary.find_many(
             distinct=["projectKey"],
-            order={"projectDescription": "asc"}
+            order={"projectName": "asc"}
         )
-        
+
         # Build unique projects list
         seen = set()
         projects = []
@@ -158,25 +158,15 @@ async def get_projects(token: Optional[str] = Depends(get_session_token)):
                 projects.append({
                     "project_key": row.projectKey,
                     "name": row.projectId,
-                    "project_description": row.projectDescription,
+                    "project_description": row.projectName,
                     "start_date": row.baselineStartDate,
                     "end_date": row.baselineFinishDate,
                     "location": row.projectLocation
                 })
-        
-        # # Date range (commented out — not available in new schema)
-        # date_stats = await prisma.sraactivitytable.find_first(order={"date": "asc"})
-        # date_stats_max = await prisma.sraactivitytable.find_first(order={"date": "desc"})
-        # date_from = date_stats.date if date_stats else None
-        # date_to = date_stats_max.date if date_stats_max else None
-        
-        return {
-            "projects": projects,
-        }
+
+        return {"projects": projects}
+    except AttributeError as e:
+        # Prisma model not found (e.g. client not regenerated)
+        return {"projects": [], "error": "Projects table unavailable"}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {
-            "projects": [],
-            "error": str(e)
-        }
+        return {"projects": [], "error": str(e)}

@@ -481,10 +481,10 @@ async def chat(request: ChatRequest, user=Depends(get_current_user)):
             if project_data:
                 project_context = {
                     "project_key": request.project_key,
-                    "project_name": project_data.projectDescription,
+                    "project_name": project_data.projectName,
                     "project_location": project_data.projectLocation,
                     "start_date": project_data.baselineStartDate,
-                    "end_date": project_data.contractualEndDate
+                    "end_date": project_data.contractualCompletionDate
                 }
         except Exception as e:
             print(f"Error getting project context: {e}")
@@ -763,10 +763,10 @@ async def websocket_chat(websocket: WebSocket, thread_id: str):
                     if project_data:
                         project_context = {
                             "project_key": project_key,
-                            "project_name": project_data.projectDescription,
+                            "project_name": project_data.projectName,
                             "project_location": project_data.projectLocation,
                             "start_date": project_data.baselineStartDate,
-                            "end_date": project_data.contractualEndDate
+                            "end_date": project_data.contractualCompletionDate
                         }
                 except Exception as e:
                     print(f"Error getting project context: {e}")

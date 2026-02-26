@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
     # Database
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/postgres"
+    DATABASE_URL: str = "postgresql://postgres:l-t-eye-password@192.168.1.20:5432/postgres"
     
     # Redis
     REDIS_URL: str
@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "local-model"  # Model name for OpenAI-compatible API
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 2048
-    OPENROUTER_API_KEY: str 
-    GEMINI_API_KEY: str
-    OPENAI_API_KEY: str
+    OPENROUTER_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
     API_SLUG: str = "/api/v1"
     
     # Cache settings

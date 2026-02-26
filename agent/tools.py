@@ -91,7 +91,7 @@ async def sra_status_pei(
     if not project_key:
         try:
             all_records = await prisma.tbl01projectsummary.find_many(
-                select={"projectKey": True, "projectDescription": True, "project_id": True},
+                select={"projectKey": True, "projectName": True, "projectId": True},
                 take=20
             )
             seen = set()
@@ -103,7 +103,7 @@ async def sra_status_pei(
                     if len(unique_projects) >= 10:
                         break
             
-            project_list = "\n".join([f"  - {p.projectKey}: {p.projectDescription}" for p in unique_projects])
+            project_list = "\n".join([f"  - {p.projectKey}: {p.projectName}" for p in unique_projects])
             return f"📋 **Which project?**\n\nAvailable projects:\n{project_list}\n\n💡 Example: *Is project 101 on track?*"
         except:
             return "📋 **Please specify which project to check (project_key).**"
@@ -120,7 +120,7 @@ async def sra_status_pei(
             return f"No data found for project_key {project_key}. Please verify the project key."
         
         # Extract project-level metrics
-        project_name = project_summary.projectDescription
+        project_name = project_summary.projectName
         project_location = project_summary.projectLocation
         pei_value = project_summary.projectExecutionIndex
         spi_value = project_summary.spiOverall
@@ -294,7 +294,7 @@ async def sra_drill_delay(
     if not project_key:
         try:
             all_records = await prisma.tbl01projectsummary.find_many(
-                select={"projectKey": True, "projectDescription": True},
+                select={"projectKey": True, "projectName": True},
                 take=20
             )
             seen = set()
@@ -306,7 +306,7 @@ async def sra_drill_delay(
                     if len(unique_projects) >= 10:
                         break
             
-            project_list = "\n".join([f"  - {p.projectKey}: {p.projectDescription}" for p in unique_projects])
+            project_list = "\n".join([f"  - {p.projectKey}: {p.projectName}" for p in unique_projects])
             missing_params.append(f"Please specify which project. Available projects:\n{project_list}")
         except Exception as e:
             missing_params.append("Please specify which project to analyze (project_key)")
@@ -328,7 +328,7 @@ async def sra_drill_delay(
         if not project_summary:
             return f"No data found for project_key {project_key}."
         
-        project_name = project_summary.projectDescription
+        project_name = project_summary.projectName
         forecast_delay_days = project_summary.maxForecastDelayDaysOverall
         
         # Get activity-level data (current snapshot)
@@ -484,7 +484,7 @@ async def sra_recovery_advise(
     if not project_key:
         try:
             all_records = await prisma.tbl01projectsummary.find_many(
-                select={"projectKey": True, "projectDescription": True},
+                select={"projectKey": True, "projectName": True},
                 take=20
             )
             seen = set()
@@ -496,7 +496,7 @@ async def sra_recovery_advise(
                     if len(unique_projects) >= 10:
                         break
             
-            project_list = "\n".join([f"  - {p.projectKey}: {p.projectDescription}" for p in unique_projects])
+            project_list = "\n".join([f"  - {p.projectKey}: {p.projectName}" for p in unique_projects])
             return f"📋 **I need more information to provide recovery advice:**\n\nPlease specify which project. Available projects:\n{project_list}\n\n💡 Example: *How do we recover project 101?*"
         except Exception as e:
             return "📋 **Please specify which project needs recovery advice (project_key).**"
@@ -523,7 +523,7 @@ async def sra_recovery_advise(
         wf_ready_count = sum(1 for a in activities if (a.workfrontReadyPct or 0) >= 70) if activities else 0
         wf_pct = (wf_ready_count / len(activities) * 100) if activities else 0
         
-        response = f"## 🔧 Recovery Advice for {project_summary.projectDescription}\n\n"
+        response = f"## 🔧 Recovery Advice for {project_summary.projectName}\n\n"
         response += f"**Current Status:**\n"
         response += f"- 📊 PEI: {project_summary.projectExecutionIndex:.4f}\n"
         response += f"- 📈 SPI: {project_summary.spiOverall:.4f}\n"
@@ -613,7 +613,7 @@ async def sra_simulate(
     if not project_key:
         try:
             all_records = await prisma.tbl01projectsummary.find_many(
-                select={"projectKey": True, "projectDescription": True},
+                select={"projectKey": True, "projectName": True},
                 take=20
             )
             seen = set()
@@ -625,7 +625,7 @@ async def sra_simulate(
                     if len(unique_projects) >= 10:
                         break
             
-            project_list = "\n".join([f"  - {p.projectKey}: {p.projectDescription}" for p in unique_projects])
+            project_list = "\n".join([f"  - {p.projectKey}: {p.projectName}" for p in unique_projects])
             missing_params.append(f"**Project** - Which project? Available:\n{project_list}")
         except:
             missing_params.append("**Project** - Please specify the project key")
@@ -685,7 +685,7 @@ async def sra_simulate(
         new_delay = max(0, current_delay - days_recovered)
         new_spi = min(1.0, current_spi + (productivity_factor * 0.1))
         
-        response = f"## 📊 Simulation Results for {project_summary.projectDescription}\n\n"
+        response = f"## 📊 Simulation Results for {project_summary.projectName}\n\n"
         response += f"**Scenario**: Add {value_amount} {resource_type}"
         if date_range:
             response += f" ({date_range})"
@@ -747,7 +747,7 @@ async def sra_create_action(
     if not project_key:
         try:
             all_records = await prisma.tbl01projectsummary.find_many(
-                select={"projectKey": True, "projectDescription": True},
+                select={"projectKey": True, "projectName": True},
                 take=20
             )
             seen = set()
@@ -759,7 +759,7 @@ async def sra_create_action(
                     if len(unique_projects) >= 10:
                         break
             
-            project_list = "\n".join([f"  - {p.projectKey}: {p.projectDescription}" for p in unique_projects])
+            project_list = "\n".join([f"  - {p.projectKey}: {p.projectName}" for p in unique_projects])
             missing_params.append(f"**Project** - Which project? Available:\n{project_list}")
         except:
             missing_params.append("**Project** - Please specify the project key")
@@ -781,7 +781,7 @@ async def sra_create_action(
             where={"projectKey": project_key_int}
         )
         
-        project_name = project_summary.projectDescription if project_summary else str(project_key)
+        project_name = project_summary.projectName if project_summary else str(project_key)
         
         # Generate action ID
         from datetime import datetime
@@ -860,7 +860,7 @@ async def sra_explain_formula(
             )
             if project_summary:
                 project_context = project_summary
-                response += f"**Project Context**: {project_summary.projectDescription} (Key: {project_key})\n\n---\n\n"
+                response += f"**Project Context**: {project_summary.projectName} (Key: {project_key})\n\n---\n\n"
         except:
             pass
     
