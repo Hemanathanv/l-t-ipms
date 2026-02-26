@@ -88,7 +88,7 @@ function SidebarInnerContent({
                         onNewChat();
                         setOpen(false);
                     }}
-                    className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:mt-2"
+                    className="sidebar-new-chat-btn mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-all active:scale-[0.98] group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:mt-2"
                 >
                     <Plus size={18} />
                     <span className="group-data-[collapsible=icon]:hidden">New Chat</span>
@@ -103,9 +103,9 @@ function SidebarInnerContent({
                     conversations.map((conv: Conversation) => (
                         <div
                             key={conv.threadId}
-                            className={`group p-3 rounded-lg cursor-pointer transition-all ${conv.threadId === currentThreadId
-                                ? 'bg-blue-100 border border-blue-300'
-                                : 'hover:bg-gray-100 border border-transparent'
+                            className={`sidebar-conv-item group p-2.5 rounded-lg cursor-pointer transition-all border ${conv.threadId === currentThreadId
+                                ? 'sidebar-conv-item-active'
+                                : 'sidebar-conv-item-inactive'
                                 }`}
                             onClick={() => {
                                 onSelectConversation(conv.threadId);
@@ -114,19 +114,19 @@ function SidebarInnerContent({
                         >
                             <div className="flex items-start justify-between gap-2">
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                    <p className="sidebar-conv-title truncate">
                                         {conv.title || 'Untitled'}
                                     </p>
-                                    <p className="text-xs text-gray-500 mt-1">
+                                    <p className="sidebar-conv-date">
                                         {formatDate(conv.createdAt)}
                                     </p>
                                 </div>
                                 <button
-                                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-100 rounded transition-all"
+                                    className="sidebar-conv-delete opacity-0 group-hover:opacity-100 p-1.5 rounded transition-all"
                                     onClick={(e) => handleDelete(e, conv.threadId)}
                                     title="Delete conversation"
                                 >
-                                    <Trash2 size={14} className="text-red-600" />
+                                    <Trash2 size={14} />
                                 </button>
                             </div>
                         </div>

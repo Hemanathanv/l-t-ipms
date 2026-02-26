@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, Sparkles, Check, Menu } from 'lucide-react';
+import { ChevronDown, Sparkles, Check, Menu, FolderOpen } from 'lucide-react';
 import { useProjects } from '@/actions/useProjects';
 import { useSidebar } from '@/components/ui/sidebar';
 import Logout from '@/components/user/Logout';
@@ -118,13 +118,14 @@ export function ChatHeader({
             </div>
 
             <div className="header-right">
-                <div className="project-selector">
-                    <label htmlFor="projectSelect">Project:</label>
+                <div className="project-selector project-selector-button">
+                    <FolderOpen size={14} className="project-selector-icon" />
                     <select
                         id="projectSelect"
                         value={selectedProjectKey}
                         onChange={(e) => onProjectChange(e.target.value)}
                         disabled={isLoading}
+                        className="project-selector-select"
                     >
                         <option value="">Select Project</option>
                         {projectsData?.projects.map((project) => (
@@ -133,8 +134,9 @@ export function ChatHeader({
                             </option>
                         ))}
                     </select>
+                    <ChevronDown size={13} className="project-selector-chevron" aria-hidden />
                 </div>
-                <Logout className="w-auto px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5" />
+                <Logout className="logout-btn-ref" />
             </div>
         </header>
     );

@@ -87,47 +87,47 @@ function ToolOutputBlock({ content }: { content: string }) {
     );
 }
 
-// Collapsible thinking indicator - ChatGPT style
+// Dynamic messages shown while thinking (no seconds)
+const THINKING_PHRASES = [
+    'Thinking…',
+    'Analyzing your question…',
+    'Checking project data…',
+    'Preparing response…',
+    'Reviewing context…',
+    'Gathering information…',
+];
+
+// Collapsible thinking indicator — dynamic label, no seconds
 function ThinkingIndicator({ isThinking, thinkingContent }: { isThinking: boolean; thinkingContent?: string }) {
     const [isExpanded, setIsExpanded] = useState(false);
-    const [thinkingSeconds, setThinkingSeconds] = useState(0);
+    const [phraseIndex, setPhraseIndex] = useState(0);
 
     useEffect(() => {
-        if (!isThinking) {
-            return;
-        }
-
+        if (!isThinking) return;
         const interval = setInterval(() => {
-            setThinkingSeconds(prev => prev + 1);
-        }, 1000);
-
+            setPhraseIndex((i) => (i + 1) % THINKING_PHRASES.length);
+        }, 2200);
         return () => clearInterval(interval);
-    }, [isThinking]);
-
-    // Reset timer when new thinking session starts
-    useEffect(() => {
-        if (isThinking) {
-            setThinkingSeconds(0);
-        }
     }, [isThinking]);
 
     if (!isThinking && !thinkingContent) return null;
 
     return (
-        <div className="thinking-indicator">
+        <div className="thinking-indicator thinking-bubble">
             <button
                 className="thinking-toggle"
                 onClick={() => setIsExpanded(!isExpanded)}
+                type="button"
             >
-                {/* <span className="thinking-icon">💭</span> */}
-                <span className="thinking-label">
-                    {isThinking ? (
-                        <>Thinking for {thinkingSeconds}s</>
-                    ) : (
-                        <>Thought for {thinkingSeconds}s</>
-                    )}
+                <span className="thinking-dots" aria-hidden>
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
                 </span>
-                <span className={`thinking-chevron ${isExpanded ? 'expanded' : ''}`}>
+                <span className="thinking-label">
+                    {isThinking ? THINKING_PHRASES[phraseIndex] : 'Thought process'}
+                </span>
+                <span className={`thinking-chevron ${isExpanded ? 'expanded' : ''}`} aria-hidden>
                     {'\u203A'}
                 </span>
             </button>
@@ -154,7 +154,7 @@ function AssistantContent({ content }: { content: string }) {
                 <MarkdownContent content={dataPart} />
                 <div className="ai-insight-card">
                     <div className="ai-insight-header">
-                        <span className="ai-insight-icon">{'\u2726'}</span>
+                        <span className="ai-insight-icon" aria-hidden>💡</span>
                         <span>AI Insight</span>
                     </div>
                     <div className="ai-insight-body">
@@ -232,7 +232,7 @@ export function MessageList({
                                 {message.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16'}
                             </div>
                             <div className="message-body">
-                                <div className="message-content">
+                                <div className={`message-content${message.role === 'assistant' ? ' prose-chat' : ''}`}>
                                     {isEditing ? (
                                         <div className="edit-mode">
                                             <textarea
@@ -276,7 +276,7 @@ export function MessageList({
                 {isStreaming && (
                     <div className="message assistant streaming">
                         <div className="message-avatar">{'\uD83E\uDD16'}</div>
-                        <div className="message-content">
+                        <div className="message-content prose-chat">
                             {/* Thinking indicator - ChatGPT style */}
                             <ThinkingIndicator isThinking={isThinking} thinkingContent={thinkingContent} />
 
@@ -296,7 +296,7 @@ export function MessageList({
                                 isInsight ? (
                                     <div className="ai-insight-card">
                                         <div className="ai-insight-header">
-                                            <span className="ai-insight-icon">{'\u2726'}</span>
+                                            <span className="ai-insight-icon" aria-hidden>💡</span>
                                             <span>AI Insight</span>
                                         </div>
                                         <div className="ai-insight-body">

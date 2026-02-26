@@ -25,9 +25,29 @@ export interface Project {
     project_key: number;
     name: string;
     project_description: string;
-    start_date: string;
-    end_date: string;
+    start_date: string | null;
+    end_date: string | null;
     location: string;
+    /** Start date variants for display (priority: actual → forecast → baseline) */
+    actual_start_date?: string | null;
+    forecast_start_date?: string | null;
+    baseline_start_date?: string | null;
+    /** End date variants for display (priority: forecast → contractual → baseline) */
+    forecast_finish_date?: string | null;
+    contractual_finish_date?: string | null;
+    baseline_finish_date?: string | null;
+    /** Contract dates */
+    contract_start_date?: string | null;
+    contract_end_date?: string | null;
+    /** Progress & duration for panel */
+    progress_pct?: number | null;
+    elapsed_days?: number | null;
+    total_days?: number | null;
+    /** Max forecast delay (days) for PEI status — E/P/C/Overall */
+    max_forecast_delay_days_engineering?: number | null;
+    max_forecast_delay_days_construction?: number | null;
+    max_forecast_delay_days_procurement?: number | null;
+    max_forecast_delay_days_overall?: number | null;
 }
 
 export interface ProjectsResponse {

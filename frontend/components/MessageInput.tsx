@@ -47,16 +47,21 @@ export function MessageInput({ onSend, isLoading }: MessageInputProps) {
                         value={message}
                         onChange={(e) => setMessage(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="Type your message..."
+                        placeholder={isLoading ? 'Waiting for response…' : 'Ask anything about your projects…'}
                         rows={1}
                         autoFocus
+                        disabled={isLoading}
+                        className="input-textarea"
                     />
                     <button type="submit" className="send-btn" disabled={isLoading || !message.trim()}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                             <path d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z" />
                         </svg>
                     </button>
                 </div>
+                <p className="input-hint">
+                    Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for new line
+                </p>
             </form>
         </div>
     );

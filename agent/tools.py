@@ -119,16 +119,27 @@ async def sra_status_pei(
         if not project_summary:
             return f"No data found for project_key {project_key}. Please verify the project key."
         
-        # Extract project-level metrics
-        project_name = project_summary.projectName
-        project_location = project_summary.projectLocation
-        pei_value = project_summary.projectExecutionIndex
-        spi_value = project_summary.spiOverall
-        forecast_delay_days = project_summary.maxForecastDelayDaysOverall
-        eot_exposure_days = project_summary.eotExposureDays
-        executable_progress_pct = project_summary.epOverallPct
-        cumulative_planned = project_summary.cumulativePlannedOverall
-        cumulative_actual = project_summary.cumulativeActualOverall
+        # Extract project-level metrics (use safe defaults when DB has nulls)
+        project_name = project_summary.projectName or "Unknown"
+        project_location = project_summary.projectLocation or "N/A"
+        try:
+            pei_value = float(project_summary.projectExecutionIndex) if project_summary.projectExecutionIndex not in (None, "") else 1.0
+        except (TypeError, ValueError):
+            pei_value = 1.0
+        spi_value = project_summary.spiOverall if project_summary.spiOverall is not None else 1.0
+        forecast_delay_days = project_summary.maxForecastDelayDaysOverall or 0
+        delay_eng = project_summary.maxForecastDelayDaysEngineering
+        delay_const = project_summary.maxForecastDelayDaysConstruction
+        delay_proc = project_summary.maxForecastDelayDaysProcurement
+        delay_overall = project_summary.maxForecastDelayDaysOverall
+        eot_exposure_days = project_summary.eotExposureDays or 0
+        executable_progress_pct = project_summary.executableProgressOverallPct
+        cumulative_planned = project_summary.cumulativePlannedPctOverall
+        cumulative_actual = project_summary.cumulativeActualPctOverall
+        if cumulative_planned is None:
+            cumulative_planned = 0.0
+        if cumulative_actual is None:
+            cumulative_actual = 0.0
         
         # ===== GATED HEALTH CLASSIFICATION =====
         status = "On Track"
@@ -182,7 +193,11 @@ async def sra_status_pei(
         
         # --- OVERALL % and DELAY DAYS ---
         response += f"📊 **Overall Progress**: Planned {cumulative_planned:.1f}% · Actual {cumulative_actual:.1f}%  ·  "
-        response += f"**Forecast Delay**: {forecast_delay_days} days\n\n"
+        response += f"**Forecast Delay**: {forecast_delay_days or 0} days\n\n"
+        # Max Forecast Delay (days) by E/P/C/Overall — always show in chat (use — when null)
+        def _d(v):
+            return f"{v}d" if v is not None else "—"
+        response += f"📅 **Max Forecast Delay (days)** │ **E** {_d(delay_eng)} · **P** {_d(delay_proc)} · **C** {_d(delay_const)} · **Overall** {_d(delay_overall)}\n\n"
         if primary_reason and status == "At Risk":
             response += f"⚠️ *{primary_reason}*\n\n"
         

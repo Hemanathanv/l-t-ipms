@@ -149,19 +149,37 @@ async def get_projects(token: Optional[str] = Depends(get_session_token)):
             order={"projectName": "asc"}
         )
 
-        # Build unique projects list
+        # Build unique projects list with start/end date variants for display
         seen = set()
         projects = []
         for row in all_projects:
             if row.projectKey not in seen:
                 seen.add(row.projectKey)
+                # Serialize dates for frontend (priority: Actual → Forecast → Baseline for start; same + Contractual for end)
+                def _iso(d):
+                    return d.isoformat() if d is not None else None
                 projects.append({
                     "project_key": row.projectKey,
                     "name": row.projectId,
                     "project_description": row.projectName,
-                    "start_date": row.baselineStartDate,
-                    "end_date": row.baselineFinishDate,
-                    "location": row.projectLocation
+                    "location": row.projectLocation,
+                    "start_date": _iso(row.baselineStartDate),
+                    "end_date": _iso(row.baselineFinishDate),
+                    "actual_start_date": _iso(row.actualStartDate),
+                    "forecast_start_date": _iso(row.forecastStartDate),
+                    "baseline_start_date": _iso(row.baselineStartDate),
+                    "forecast_finish_date": _iso(row.forecastFinishDate),
+                    "contractual_finish_date": _iso(row.contractualCompletionDate),
+                    "baseline_finish_date": _iso(row.baselineFinishDate),
+                    "contract_start_date": None,
+                    "contract_end_date": _iso(row.contractualCompletionDate),
+                    "progress_pct": float(row.projectElapsedPct) if row.projectElapsedPct is not None else None,
+                    "elapsed_days": row.projectAgeDays,
+                    "total_days": row.baselineDurationDays,
+                    "max_forecast_delay_days_engineering": row.maxForecastDelayDaysEngineering,
+                    "max_forecast_delay_days_construction": row.maxForecastDelayDaysConstruction,
+                    "max_forecast_delay_days_procurement": row.maxForecastDelayDaysProcurement,
+                    "max_forecast_delay_days_overall": row.maxForecastDelayDaysOverall,
                 })
 
         return {"projects": projects}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MapPin, Calendar, Building2 } from 'lucide-react';
+import { MapPin, Calendar, Building2, TrendingUp, Clock, FileSignature, AlertTriangle } from 'lucide-react';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatHeader } from '@/components/ChatHeader';
@@ -22,6 +22,14 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
     const router = useRouter();
     const [selectedProjectKey, setSelectedProjectKey] = useState('');
     const { data: projectsData } = useProjects();
+
+    // When only one project exists, select it by default
+    useEffect(() => {
+        const projects = projectsData?.projects;
+        if (projects?.length === 1 && !selectedProjectKey) {
+            setSelectedProjectKey(String(projects[0].project_key));
+        }
+    }, [projectsData?.projects, selectedProjectKey]);
 
     const selectedProject = projectsData?.projects.find(
         (p) => String(p.project_key) === selectedProjectKey
@@ -98,8 +106,24 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
 
     const hasMessages = messages.length > 0 || isStreaming;
 
+    // Start: Actual → Forecast → Planned. End: Forecast → Contractual → Planned. Labels use "Planned" instead of "Baseline".
+    const startDateDisplay = selectedProject
+        ? (() => {
+            const v = selectedProject.actual_start_date ?? selectedProject.forecast_start_date ?? selectedProject.baseline_start_date ?? selectedProject.start_date ?? null;
+            const label = selectedProject.actual_start_date ? 'Start Date (Actual)' : selectedProject.forecast_start_date ? 'Start Date (Forecast)' : 'Start Date (Planned)';
+            return { label, value: v };
+        })()
+        : null;
+    const endDateDisplay = selectedProject
+        ? (() => {
+            const v = selectedProject.forecast_finish_date ?? selectedProject.contractual_finish_date ?? selectedProject.baseline_finish_date ?? selectedProject.end_date ?? null;
+            const label = selectedProject.forecast_finish_date ? 'End Date (Forecast)' : selectedProject.contractual_finish_date ? 'End Date (Contractual)' : 'End Date (Planned)';
+            return { label, value: v };
+        })()
+        : null;
+
     return (
-        <div className="flex h-screen w-full">
+        <div className="flex h-screen w-full bg-[var(--chat-surface)]">
             <Sidebar
                 currentThreadId={threadId}
                 onSelectConversation={handleSelectConversation}
@@ -145,7 +169,8 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
                             // Centered welcome layout for new conversations
                             <div className="welcome-container">
                                 <div className="welcome-content">
-                                    <h1 className="welcome-heading">What's on your mind today?</h1>
+                                    <h1 className="welcome-heading">What would you like to know?</h1>
+                                    <p className="welcome-subtitle">Ask me about your projects, metrics, deadlines, or team performance.</p>
                                     <MessageInput
                                         onSend={handleSendMessage}
                                         isLoading={isStreaming}
@@ -156,23 +181,122 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
                     </div>
 
                     {selectedProject && (
-                        <aside className="project-info-card">
+                        <aside className="project-info-card project-panel-ref">
                             <div className="project-info-card-header">
-                                <Building2 size={18} />
-                                <span>Project Details</span>
+                                <div className="flex items-center gap-2">
+                                    <div className="project-panel-icon-wrap">
+                                        <Building2 size={14} />
+                                    </div>
+                                    <span className="text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">Active Project</span>
+                                </div>
+                                <h3 className="project-info-card-title mt-2">{selectedProject.project_description || selectedProject.name}</h3>
                             </div>
                             <div className="project-info-card-body">
-                                <h3 className="project-info-card-title">{selectedProject.project_description}</h3>
-                                <div className="project-info-card-row">
-                                    <MapPin size={14} />
-                                    <span>{selectedProject.location}</span>
+                                {selectedProject.location && (
+                                    <div className="project-panel-row">
+                                        <MapPin size={14} className="project-panel-row-icon" />
+                                        <div>
+                                            <p className="project-panel-label">Location</p>
+                                            <p className="project-panel-value">{selectedProject.location}</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {startDateDisplay && (
+                                    <div className="project-panel-row">
+                                        <Calendar size={14} className="project-panel-row-icon" />
+                                        <div>
+                                            <p className="project-panel-label">{startDateDisplay.label}</p>
+                                            <p className="project-panel-value">
+                                                {startDateDisplay.value ? new Date(startDateDisplay.value).toLocaleDateString() : '—'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+                                {endDateDisplay && (
+                                    <div className="project-panel-row">
+                                        <Calendar size={14} className="project-panel-row-icon" />
+                                        <div>
+                                            <p className="project-panel-label">{endDateDisplay.label}</p>
+                                            <p className="project-panel-value">
+                                                {endDateDisplay.value ? new Date(endDateDisplay.value).toLocaleDateString() : '—'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+                                {/* Contract Start / End */}
+                                <div className="project-panel-row">
+                                    <FileSignature size={14} className="project-panel-row-icon" />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="project-panel-label">Contract Start Date</p>
+                                        <p className="project-panel-value">
+                                            {selectedProject.contract_start_date ? new Date(selectedProject.contract_start_date).toLocaleDateString() : '—'}
+                                        </p>
+                                    </div>
                                 </div>
-                                {selectedProject.start_date && selectedProject.end_date && (
-                                    <div className="project-info-card-row">
-                                        <Calendar size={14} />
-                                        <span>
-                                            {new Date(selectedProject.start_date).toLocaleDateString()} — {new Date(selectedProject.end_date).toLocaleDateString()}
-                                        </span>
+                                <div className="project-panel-row">
+                                    <FileSignature size={14} className="project-panel-row-icon" />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="project-panel-label">Contract End Date</p>
+                                        <p className="project-panel-value">
+                                            {selectedProject.contract_end_date ? new Date(selectedProject.contract_end_date).toLocaleDateString() : '—'}
+                                        </p>
+                                    </div>
+                                </div>
+                                {/* Progress — label "Progress" with bar and % on same row */}
+                                {(selectedProject.progress_pct != null || (selectedProject.elapsed_days != null && selectedProject.total_days != null)) && (
+                                    <div className="project-panel-row project-panel-progress-row">
+                                        <TrendingUp size={14} className="project-panel-row-icon" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="project-panel-label">Progress</p>
+                                            {selectedProject.progress_pct != null && (() => {
+                                                const pct = Number(selectedProject.progress_pct);
+                                                const displayPct = pct <= 1 ? pct * 100 : pct;
+                                                const width = Math.min(100, Math.max(0, displayPct));
+                                                return (
+                                                    <div className="project-panel-progress-wrap">
+                                                        <div className="project-panel-progress-bar">
+                                                            <div className="project-panel-progress-fill" style={{ width: `${width}%` }} />
+                                                        </div>
+                                                        <span className="project-panel-progress-pct">{displayPct.toFixed(0)}%</span>
+                                                    </div>
+                                                );
+                                            })()}
+                                            {selectedProject.progress_pct == null && selectedProject.elapsed_days != null && selectedProject.total_days != null && (
+                                                <p className="project-panel-value">{selectedProject.elapsed_days} of {selectedProject.total_days} days</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                {/* Duration — intelligent: when elapsed > total show overrun */}
+                                {selectedProject.elapsed_days != null && selectedProject.total_days != null && (
+                                    <div className="project-panel-row">
+                                        <Clock size={14} className="project-panel-row-icon" />
+                                        <div>
+                                            <p className="project-panel-label">Duration</p>
+                                            <p className="project-panel-value">
+                                                {selectedProject.elapsed_days <= selectedProject.total_days
+                                                    ? `${selectedProject.elapsed_days} of ${selectedProject.total_days} days elapsed`
+                                                    : `${selectedProject.total_days} days total · ${selectedProject.elapsed_days} elapsed (${selectedProject.elapsed_days - selectedProject.total_days} days overrun)`
+                                                }
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+                                {/* Max Forecast Delay (days) — PEI status: E / P / C / Overall */}
+                                {(selectedProject.max_forecast_delay_days_engineering != null || selectedProject.max_forecast_delay_days_construction != null || selectedProject.max_forecast_delay_days_procurement != null || selectedProject.max_forecast_delay_days_overall != null) && (
+                                    <div className="project-panel-row">
+                                        <AlertTriangle size={14} className="project-panel-row-icon" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="project-panel-label">Max Forecast Delay (days)</p>
+                                            <p className="project-panel-value text-[0.8rem]">
+                                                {[
+                                                    selectedProject.max_forecast_delay_days_engineering != null && `E: ${selectedProject.max_forecast_delay_days_engineering}`,
+                                                    selectedProject.max_forecast_delay_days_procurement != null && `P: ${selectedProject.max_forecast_delay_days_procurement}`,
+                                                    selectedProject.max_forecast_delay_days_construction != null && `C: ${selectedProject.max_forecast_delay_days_construction}`,
+                                                    selectedProject.max_forecast_delay_days_overall != null && `Overall: ${selectedProject.max_forecast_delay_days_overall}`,
+                                                ].filter(Boolean).join(' · ')}
+                                            </p>
+                                        </div>
                                     </div>
                                 )}
                             </div>
