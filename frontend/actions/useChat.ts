@@ -24,12 +24,19 @@ export function useChat(options: UseChatOptions = {}) {
     const [thinkingContent, setThinkingContent] = useState('');
     const [isThinking, setIsThinking] = useState(false);
     const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
+    const [toolOutput, setToolOutput] = useState<string | null>(null);
+    const [isInsight, setIsInsight] = useState(false);
     const [isConnected, setIsConnected] = useState(false);
     const queryClient = useQueryClient();
     const wsRef = useRef<WebSocket | null>(null);
     const accumulatedContentRef = useRef('');
     const pendingMessageRef = useRef<{ content: string; projectKey?: string } | null>(null);
     const currentThreadIdRef = useRef<string | null>(null);
+    const toolOutputRef = useRef<string | null>(null);
+    const isInsightRef = useRef(false);
+    const reconnectAttemptsRef = useRef(0);
+    const intentionalCloseRef = useRef(false);
+    const maxReconnectAttempts = 3;
 
     const refreshConversation = useCallback(async (targetThreadId?: string | null) => {
         const resolvedThreadId = targetThreadId ?? currentThreadIdRef.current;
@@ -47,7 +54,22 @@ export function useChat(options: UseChatOptions = {}) {
                 ...m,
                 content: filterThinkTags(m.content),
             }));
-            setMessages(refreshedMessages);
+
+            // Preserve tool_output and is_insight from in-memory messages
+            // The end event doesn't send IDs, so match by last assistant position
+            setMessages(prev => {
+                const lastInsight = [...prev].reverse().find(m => m.role === 'assistant' && (m.tool_output || m.is_insight));
+                if (!lastInsight) return refreshedMessages;
+
+                const result = [...refreshedMessages];
+                for (let i = result.length - 1; i >= 0; i--) {
+                    if (result[i].role === 'assistant') {
+                        result[i] = { ...result[i], tool_output: lastInsight.tool_output, is_insight: lastInsight.is_insight };
+                        break;
+                    }
+                }
+                return result;
+            });
         } catch (error) {
             console.error('Error refreshing conversation:', error);
         }
@@ -63,7 +85,11 @@ export function useChat(options: UseChatOptions = {}) {
         setThinkingContent('');
         setStreamingContent('');
         setCurrentToolCall(null);
+        setToolOutput(null);
+        setIsInsight(false);
         accumulatedContentRef.current = '';
+        toolOutputRef.current = null;
+        isInsightRef.current = false;
         onStreamStart?.();
 
         // Send message via WebSocket (thread_id is now in the URL path)
@@ -77,6 +103,7 @@ export function useChat(options: UseChatOptions = {}) {
     const connect = useCallback((wsThreadId?: string | null) => {
         // Close existing connection if connecting to a different thread
         if (wsRef.current) {
+            intentionalCloseRef.current = true;
             wsRef.current.close();
             wsRef.current = null;
         }
@@ -89,6 +116,7 @@ export function useChat(options: UseChatOptions = {}) {
         ws.onopen = () => {
             console.log('[WS] Connected');
             setIsConnected(true);
+            reconnectAttemptsRef.current = 0;  // Reset on successful connection
 
             // If there's a pending message, send it now
             if (pendingMessageRef.current) {
@@ -141,10 +169,19 @@ export function useChat(options: UseChatOptions = {}) {
                         }
                         break;
                     case 'tool_result':
-                        // Tool completed - clear tool call indicator
-                        // Ready for fresh streaming from follow-up LLM call
+                        // Tool completed — show raw tool output
                         setCurrentToolCall(null);
+                        if (data.content) {
+                            setToolOutput(data.content);
+                            toolOutputRef.current = data.content;
+                        }
                         setIsThinking(true);  // LLM will think again after tool result
+                        break;
+                    case 'insight_start':
+                        // LLM is now synthesizing tool output — render as insight card
+                        setIsInsight(true);
+                        isInsightRef.current = true;
+                        setIsThinking(false);
                         break;
                     case 'end':
                         // Finalize the message
@@ -163,10 +200,17 @@ export function useChat(options: UseChatOptions = {}) {
                         setIsThinking(false);
                         setCurrentToolCall(null);
                         setIsStreaming(false);
+                        setIsInsight(false);
+                        setToolOutput(null);
+
+                        // Capture refs before clearing
+                        const capturedToolOutput = toolOutputRef.current;
+                        const capturedIsInsight = isInsightRef.current;
+                        toolOutputRef.current = null;
+                        isInsightRef.current = false;
 
                         // Then add the finalized message with proper IDs
                         const filteredContent = filterThinkTags(finalContent);
-                        console.log(`[FE-END] filteredContent_len=${filteredContent.length}, adding to messages`);
 
                         setMessages(prev => {
                             const newMessages = [...prev];
@@ -179,12 +223,17 @@ export function useChat(options: UseChatOptions = {}) {
                                 }
                             }
 
-                            // Add assistant message with its ID
-                            if (filteredContent) {
+                            // Add assistant message — keep tool_output and is_insight as metadata
+                            const msgContent = capturedToolOutput
+                                ? capturedToolOutput + '\n\n<!-- INSIGHT -->\n\n' + filteredContent
+                                : filteredContent;
+                            if (msgContent) {
                                 const assistantMessage: Message = {
                                     role: 'assistant',
-                                    content: filteredContent,
-                                    id: assistantMessageId || undefined
+                                    content: msgContent,
+                                    id: assistantMessageId || undefined,
+                                    tool_output: capturedToolOutput || undefined,
+                                    is_insight: capturedIsInsight || undefined,
                                 };
                                 newMessages.push(assistantMessage);
                             }
@@ -213,12 +262,22 @@ export function useChat(options: UseChatOptions = {}) {
         ws.onclose = () => {
             console.log('[WS] Disconnected');
             setIsConnected(false);
+            // Only auto-reconnect on UNEXPECTED disconnects
+            if (intentionalCloseRef.current) {
+                intentionalCloseRef.current = false;
+                return;
+            }
+            if (reconnectAttemptsRef.current < maxReconnectAttempts) {
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 8000);
+                reconnectAttemptsRef.current += 1;
+                console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
+                setTimeout(() => connect(currentThreadIdRef.current), delay);
+            }
         };
 
         ws.onerror = () => {
-            // WebSocket onerror events don't contain useful info
-            // The actual error handling happens in onclose
-            console.debug('[WS] Connection error - will retry on close');
+            // Silent — reconnect handled in onclose
+            console.debug('[WS] Connection error — will reconnect on close');
         };
 
         wsRef.current = ws;
@@ -228,6 +287,7 @@ export function useChat(options: UseChatOptions = {}) {
     useEffect(() => {
         connect(null);
         return () => {
+            intentionalCloseRef.current = true;
             wsRef.current?.close();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -270,7 +330,8 @@ export function useChat(options: UseChatOptions = {}) {
     }, [connect, sendMessageInternal]);
 
     const stopStreaming = useCallback(() => {
-        // Close and reconnect to stop the current stream
+        // Close intentionally — don't trigger auto-reconnect
+        intentionalCloseRef.current = true;
         wsRef.current?.close();
         setIsStreaming(false);
         setCurrentToolCall(null);
@@ -406,6 +467,8 @@ export function useChat(options: UseChatOptions = {}) {
         thinkingContent,
         isThinking,
         currentToolCall,
+        toolOutput,
+        isInsight,
         isConnected,
         sendMessage,
         editMessage,

@@ -97,32 +97,15 @@ async def chat_node(state: AgentState) -> dict:
     """
     Main chat node that processes user messages and generates responses.
     Uses LLM with tools bound.
-    
-    If the last message is a ToolMessage from an SRA tool, the tool output
-    is returned directly as an AIMessage to prevent the LLM from summarizing
-    formatted markdown tables.
     """
     from .message_pruner import prune_messages, MAX_CONTEXT_TOKENS
     
     # Get the conversation history
     messages = list(state["messages"])
     
-    # --- SHORT-CIRCUIT: Pass through SRA tool output directly ---
-    # Small models (Qwen3-8B) tend to summarize/rewrite formatted tool output.
-    # When the last message is a ToolMessage, return it directly as an AIMessage
-    # so the user sees the full formatted table without LLM rewriting.
-    last_msg = messages[-1] if messages else None
-    if isinstance(last_msg, ToolMessage) and last_msg.content:
-        tool_content = last_msg.content
-        # Only short-circuit for SRA tools that return formatted markdown
-        if any(marker in tool_content for marker in ["##", "| ", "**SPI**", "**PEI**", "📊"]):
-            return {"messages": [AIMessage(content=tool_content)]}
-    
     llm = get_llm()
     
     # Bind tools to the LLM
-    # Note: For vLLM, you need to start the server with:
-    #   --enable-auto-tool-choice --tool-call-parser hermes
     llm_with_tools = llm.bind_tools(SRA_TOOLS)
     
     # Add system prompt if this is the start of conversation
@@ -134,16 +117,15 @@ async def chat_node(state: AgentState) -> dict:
     messages = prune_messages(messages, max_tokens=MAX_CONTEXT_TOKENS)
     
     # Call the LLM with tools
-    # Use sync invoke in a thread to avoid async streaming issues
     import asyncio
     response = await asyncio.to_thread(llm_with_tools.invoke, messages)
     
     return {"messages": [response]}
 
 
-def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
+def should_continue(state: AgentState) -> Literal["tools", "respond"]:
     """
-    Determine if we should continue to tools or end.
+    Determine if we should continue to tools or go to respond.
     """
     messages = state["messages"]
     last_message = messages[-1]
@@ -152,8 +134,47 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "tools"
     
-    # Otherwise, end
-    return "__end__"
+    # Otherwise, go to respond (direct answer, no insight needed)
+    return "respond"
+
+
+INSIGHT_SYSTEM_PROMPT = """You are an AI insight analyst for the planning officer of Larcen & Turbo Construction. You have just received raw data from an Engineering, Procurement and Construction (EPC) project regarding schedule progress. 
+Here SPI refers to schedule performance index and PEI refers to project efficiency index. PEI = Forecasted Duration/Planned Duration
+Your job is to:
+
+1. Summarize the key findings concisely
+2. Highlight any metrics that are concerning or noteworthy
+3. Provide actionable recommendations
+4. Keep your insight brief (3-5 sentences max)
+
+Do NOT repeat the raw data tables. Focus on what the data MEANS and what actions should be taken.
+If the project is on track, say so briefly. If there are issues, be specific about what needs attention.
+"""
+
+
+async def insights_node(state: AgentState) -> dict:
+    """
+    Insights node — synthesizes raw tool output into actionable insight.
+    Calls LLM WITHOUT tools bound (pure synthesis, no tool-calling).
+    """
+    messages = list(state["messages"])
+    
+    llm = get_llm()  # No tools bound
+    
+    # Build messages with insight-focused system prompt
+    insight_messages = [SystemMessage(content=INSIGHT_SYSTEM_PROMPT)] + messages
+    
+    # Use ainvoke directly so astream_events captures on_chat_model_stream
+    response = await llm.ainvoke(insight_messages)
+    
+    return {"messages": [response]}
+
+
+def format_final_response(state: AgentState) -> dict:
+    """
+    Final respond node — pass-through to mark response as complete.
+    """
+    return {"messages": []}
 
 
 def build_graph() -> StateGraph:
@@ -161,7 +182,8 @@ def build_graph() -> StateGraph:
     Build the LangGraph conversation graph with tools.
     
     Graph structure:
-    START -> chat -> (tools -> chat)* -> END
+    START -> SR-AGENT -> tools -> insights -> respond -> END
+                      ↘ respond -> END  (no tools needed)
     """
     # Create the graph builder
     graph_builder = StateGraph(AgentState)
@@ -172,22 +194,30 @@ def build_graph() -> StateGraph:
     # Add nodes
     graph_builder.add_node("SR-AGENT", chat_node)
     graph_builder.add_node("tools", tool_node)
+    graph_builder.add_node("insights", insights_node)
+    graph_builder.add_node("respond", format_final_response)
     
     # Define the flow
     graph_builder.add_edge(START, "SR-AGENT")
     
-    # Conditional edge from chat: either go to tools or end
+    # Conditional edge: SR-AGENT decides to call tools or respond directly
     graph_builder.add_conditional_edges(
         "SR-AGENT",
         should_continue,
         {
             "tools": "tools",
-            "__end__": END
+            "respond": "respond"
         }
     )
     
-    # After tools, always go back to chat for LLM to process results
-    graph_builder.add_edge("tools", "SR-AGENT")
+    # After tools → insights (LLM synthesizes tool output)
+    graph_builder.add_edge("tools", "insights")
+    
+    # After insights → respond (finalize)
+    graph_builder.add_edge("insights", "respond")
+    
+    # Respond → END
+    graph_builder.add_edge("respond", END)
     
     return graph_builder
 

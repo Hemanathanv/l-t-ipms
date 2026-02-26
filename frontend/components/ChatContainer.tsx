@@ -35,6 +35,8 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
         thinkingContent,
         isThinking,
         currentToolCall,
+        toolOutput,
+        isInsight,
         sendMessage,
         editMessage,
         submitFeedback,
@@ -128,6 +130,8 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
                                     isThinking={isThinking}
                                     thinkingContent={thinkingContent}
                                     currentToolCall={currentToolCall}
+                                    toolOutput={toolOutput}
+                                    isInsight={isInsight}
                                     onEditMessage={editMessage}
                                     onFeedback={submitFeedback}
                                     onSwitchBranch={switchBranch}

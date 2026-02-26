@@ -12,6 +12,8 @@ interface MessageListProps {
     isThinking?: boolean;
     thinkingContent?: string;
     currentToolCall?: string | null;
+    toolOutput?: string | null;
+    isInsight?: boolean;
     onEditMessage?: (id: string, newContent: string) => void;
     onFeedback?: (id: string, feedback: 'positive' | 'negative') => void;
     onSwitchBranch?: (messageId: string, branchIndex: number) => void;
@@ -62,6 +64,29 @@ function MarkdownContent({ content }: { content: string }) {
     );
 }
 
+// Collapsible tool output block — shows raw data from tool execution
+function ToolOutputBlock({ content }: { content: string }) {
+    const [isExpanded, setIsExpanded] = useState(true);
+
+    return (
+        <div className="tool-output-block">
+            <button
+                className="tool-output-toggle"
+                onClick={() => setIsExpanded(!isExpanded)}
+            >
+                <span className="tool-output-icon">{'\uD83D\uDCCA'}</span>
+                <span>Data Retrieved</span>
+                <span className="toggle-chevron">{isExpanded ? '\u25BE' : '\u25B8'}</span>
+            </button>
+            {isExpanded && (
+                <div className="tool-output-content">
+                    <MarkdownContent content={content} />
+                </div>
+            )}
+        </div>
+    );
+}
+
 // Collapsible thinking indicator - ChatGPT style
 function ThinkingIndicator({ isThinking, thinkingContent }: { isThinking: boolean; thinkingContent?: string }) {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -103,7 +128,7 @@ function ThinkingIndicator({ isThinking, thinkingContent }: { isThinking: boolea
                     )}
                 </span>
                 <span className={`thinking-chevron ${isExpanded ? 'expanded' : ''}`}>
-                    ›
+                    {'\u203A'}
                 </span>
             </button>
             {isExpanded && thinkingContent && (
@@ -117,6 +142,31 @@ function ThinkingIndicator({ isThinking, thinkingContent }: { isThinking: boolea
 
 import { MessageActions } from '@/components/MessageActions';
 
+// Helper: render assistant content, splitting on INSIGHT marker if present
+function AssistantContent({ content }: { content: string }) {
+    const marker = '<!-- INSIGHT -->';
+    const idx = content.indexOf(marker);
+    if (idx !== -1) {
+        const dataPart = content.slice(0, idx).trim();
+        const insightPart = content.slice(idx + marker.length).trim();
+        return (
+            <>
+                <MarkdownContent content={dataPart} />
+                <div className="ai-insight-card">
+                    <div className="ai-insight-header">
+                        <span className="ai-insight-icon">{'\u2726'}</span>
+                        <span>AI Insight</span>
+                    </div>
+                    <div className="ai-insight-body">
+                        <MarkdownContent content={insightPart} />
+                    </div>
+                </div>
+            </>
+        );
+    }
+    return <MarkdownContent content={content} />;
+}
+
 export function MessageList({
     messages,
     streamingContent,
@@ -124,6 +174,8 @@ export function MessageList({
     isThinking = false,
     thinkingContent = '',
     currentToolCall,
+    toolOutput,
+    isInsight = false,
     onEditMessage,
     onFeedback,
     onSwitchBranch
@@ -136,7 +188,7 @@ export function MessageList({
         if (containerRef.current) {
             containerRef.current.scrollTop = containerRef.current.scrollHeight;
         }
-    }, [messages, streamingContent, currentToolCall, isThinking]);
+    }, [messages, streamingContent, currentToolCall, isThinking, toolOutput]);
 
     const handleCopy = (content: string) => {
         navigator.clipboard.writeText(content);
@@ -164,7 +216,7 @@ export function MessageList({
             <div className="messages-wrapper">
                 {messages.length === 0 && !isStreaming && (
                     <div className="welcome-message">
-                        <div className="welcome-icon">🤖</div>
+                        <div className="welcome-icon">{'\uD83E\uDD16'}</div>
                         <h2>Welcome to L&T IPMS Assistant</h2>
                         <p>Ask me anything about your projects, metrics, or get help with project management tasks.</p>
                     </div>
@@ -177,7 +229,7 @@ export function MessageList({
                     return (
                         <div key={index} className={`message ${message.role}`}>
                             <div className="message-avatar">
-                                {message.role === 'user' ? '👤' : '🤖'}
+                                {message.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16'}
                             </div>
                             <div className="message-body">
                                 <div className="message-content">
@@ -198,7 +250,7 @@ export function MessageList({
                                     ) : (
                                         <>
                                             {message.role === 'assistant' ? (
-                                                <MarkdownContent content={message.content} />
+                                                <AssistantContent content={message.content} />
                                             ) : (
                                                 message.content
                                             )}
@@ -223,7 +275,7 @@ export function MessageList({
 
                 {isStreaming && (
                     <div className="message assistant streaming">
-                        <div className="message-avatar">🤖</div>
+                        <div className="message-avatar">{'\uD83E\uDD16'}</div>
                         <div className="message-content">
                             {/* Thinking indicator - ChatGPT style */}
                             <ThinkingIndicator isThinking={isThinking} thinkingContent={thinkingContent} />
@@ -231,15 +283,33 @@ export function MessageList({
                             {/* Tool call indicator */}
                             {currentToolCall && (
                                 <div className="tool-call-indicator">
-                                    <span className="tool-spinner">⚙️</span>
+                                    <span className="tool-spinner">{'\u2699\uFE0F'}</span>
                                     <span>Calling {formatToolName(currentToolCall)}...</span>
                                 </div>
                             )}
-                            {/* Streaming content with markdown */}
-                            {streamingContent && <MarkdownContent content={streamingContent} />}
+
+                            {/* Tool output as plain markdown */}
+                            {toolOutput && <MarkdownContent content={toolOutput} />}
+
+                            {/* Streaming content — in blue card if insight, else plain */}
+                            {streamingContent && (
+                                isInsight ? (
+                                    <div className="ai-insight-card">
+                                        <div className="ai-insight-header">
+                                            <span className="ai-insight-icon">{'\u2726'}</span>
+                                            <span>AI Insight</span>
+                                        </div>
+                                        <div className="ai-insight-body">
+                                            <MarkdownContent content={streamingContent} />
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <MarkdownContent content={streamingContent} />
+                                )
+                            )}
                         </div>
                         {!currentToolCall && !isThinking && streamingContent && (
-                            <div className="streaming-cursor">▊</div>
+                            <div className="streaming-cursor">{'\u2588'}</div>
                         )}
                     </div>
                 )}

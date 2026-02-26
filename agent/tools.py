@@ -140,19 +140,19 @@ async def sra_status_pei(
         if spi_value < SPI_THRESHOLD:
             status = "At Risk"
             status_icon = "🔴"
-            primary_reason = f"SPI at {spi_value:.2f} - schedule is unreliable"
+            primary_reason = f"SPI at {spi_value:.2f} - behind schedule by {(1.0 - spi_value) * 100:.2f}%"
 
         # Gate 2: PEI (Efficiency)
         elif pei_value > PEI_THRESHOLD:
             status = "At Risk"
             status_icon = "🔴"
-            primary_reason = f"PEI at {pei_value:.2f} - forecast duration exceeds plan"
+            primary_reason = f"PEI at {pei_value:.2f} - forecast duration exceeds plan by {(pei_value - 1.0) * 100:.2f}%"
         
         # Gate 3: Forecast Delay (Time Tolerance)
         elif forecast_delay_days > FORECAST_DELAY_THRESHOLD:
             status = "At Risk"
             status_icon = "🔴"
-            primary_reason = f"{forecast_delay_days}-day forecast delay - material slippage"
+            primary_reason = f"{forecast_delay_days}-day forecast delay"
         
         else:
             status = "On Track"
@@ -255,8 +255,8 @@ async def sra_status_pei(
         
         response += "\n"
         
-        if status == "At Risk":
-            response += "💬 *Would you like me to drill down into the root causes of these delays?*\n"
+        # if status == "At Risk":
+        #     response += "💬 *Would you like me to drill down into the root causes of these delays?*\n"
         
         return response + _threshold_footer()
         

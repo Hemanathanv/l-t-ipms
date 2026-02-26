@@ -10,6 +10,9 @@ export interface Message {
     position_index?: number;
     branch_index?: number;
     total_branches?: number;
+    // Tool output + AI insight fields
+    tool_output?: string;
+    is_insight?: boolean;
 }
 
 export interface Conversation {
@@ -39,7 +42,7 @@ export interface ConversationHistory {
 
 // WebSocket stream events
 export interface StreamEvent {
-    type: 'init' | 'stream' | 'content' | 'thinking' | 'tool_call' | 'tool_result' | 'final' | 'error' | 'end';
+    type: 'init' | 'stream' | 'content' | 'thinking' | 'tool_call' | 'tool_result' | 'insight_start' | 'final' | 'error' | 'end';
     thread_id?: string;
     content?: string;
     tool?: string;

@@ -182,6 +182,8 @@ async def _run_agent_and_publish(
     final_sent = False
     assistant_message_saved = False
     in_tool_loop = False
+    insight_started = False  # Track if we've emitted insight_start for this stream
+    tool_output_content = ""  # Capture tool result content for combining with insight
 
     # Metadata tracking
     collected_tool_calls = []
@@ -204,6 +206,14 @@ async def _run_agent_and_publish(
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, 'content') and chunk.content:
                     if not in_tool_loop:
+                        # If streaming from insights node, emit insight_start once
+                        if agent_name == "insights" and not insight_started:
+                            insight_started = True
+                            await publish_stream_event(thread_id, {
+                                "type": "insight_start",
+                                "seq": seq
+                            })
+                            seq += 1
                         content = chunk.content
 
                         # Handle <think> tags
@@ -310,24 +320,36 @@ async def _run_agent_and_publish(
             # ── Tool execution complete ──
             elif event_type == "on_tool_end":
                 tool_name_val = event.get("name", "unknown")
-                tool_output = event.get("data", {}).get("output", "")
+                raw_output = event.get("data", {}).get("output", "")
+
+                # Extract .content from ToolMessage objects
+                if hasattr(raw_output, 'content'):
+                    tool_output = raw_output.content
+                elif isinstance(raw_output, dict):
+                    tool_output = raw_output.get('content', str(raw_output))
+                else:
+                    tool_output = str(raw_output)
+
+                print(f"[TOOL_END] tool={tool_name_val}, output_type={type(raw_output).__name__}, content_len={len(tool_output)}")
 
                 for tc in collected_tool_calls:
                     if tc["name"] == tool_name_val and tc["result"] is None:
-                        tc["result"] = str(tool_output)[:500]
+                        tc["result"] = tool_output[:500]
                         break
 
                 in_tool_loop = False
+                tool_output_content = tool_output  # Save for combining with insight
                 await publish_stream_event(thread_id, {
                     "type": "tool_result",
                     "tool": tool_name_val,
+                    "content": tool_output,
                     "seq": seq
                 })
                 seq += 1
 
             # ── Chain end (final output) ──
             elif event_type == "on_chain_end":
-                if agent_name == "chat" and not final_sent:
+                if agent_name in ("SR-AGENT", "insights") and not final_sent:
                     out = event.get("data", {}).get("output")
                     if out is None:
                         continue
@@ -342,8 +364,13 @@ async def _run_agent_and_publish(
                             final_sent = True
                             final_content = content or streamed_content
 
+                            # Prepend tool output to final content for DB persistence
+                            save_content = final_content
+                            if tool_output_content:
+                                save_content = tool_output_content + "\n\n<!-- INSIGHT -->\n\n" + final_content
+
                             # Persist to DB
-                            if final_content and not assistant_message_saved:
+                            if save_content and not assistant_message_saved:
                                 assistant_message_saved = True
                                 latency_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
 
@@ -351,7 +378,7 @@ async def _run_agent_and_publish(
                                     await _persist_message_to_db(
                                         thread_id,
                                         "assistant",
-                                        final_content,
+                                        save_content,
                                         input_tokens=usage_info["input_tokens"] or None,
                                         output_tokens=usage_info["output_tokens"] or None,
                                         total_tokens=usage_info["total_tokens"] or None,
@@ -361,7 +388,7 @@ async def _run_agent_and_publish(
                                     )
                                     cache_message = {
                                         "role": "assistant",
-                                        "content": final_content,
+                                        "content": save_content,
                                         "input_tokens": usage_info["input_tokens"] or None,
                                         "output_tokens": usage_info["output_tokens"] or None,
                                         "total_tokens": usage_info["total_tokens"] or None,
