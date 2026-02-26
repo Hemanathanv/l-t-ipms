@@ -19,3 +19,9 @@ static
 # files
 *.*txt
 
+
+
+#Others
+/Input_Files
+openmemory.md
+/.cursor/
