@@ -190,6 +190,10 @@
   min-height: 40px;
 }
 
+.sidebar-header-row-no-trigger {
+  /* No trigger in header; title can take space */
+}
+
 .sidebar-logo {
   flex-shrink: 0;
   display: flex;
@@ -216,17 +220,13 @@
   transition: opacity 300ms ease-in-out;
 }
 
-/* When sidebar is collapsed (icon mode), hide trigger by default, show on hover */
+/* When sidebar is collapsed (icon mode), keep trigger visible so it's always clickable */
 [data-collapsible="icon"] .sidebar-trigger-wrapper {
-  opacity: 0;
+  opacity: 1;
   position: absolute;
   left: 50%;
   top: 8px;
   transform: translateX(-50%);
-}
-
-[data-collapsible="icon"]:hover .sidebar-trigger-wrapper {
-  opacity: 1;
 }
 
 /* Sidebar Trigger Button Styling */
@@ -256,6 +256,39 @@
   color: white;
   font-size: 0.8125rem;
   font-weight: 500;
+}
+
+/* Collapse control: below New Chat, full width when expanded, icon-only when collapsed */
+.sidebar-collapse-btn {
+  margin-top: 10px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted, #64748b);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.sidebar-collapse-btn:hover {
+  background: var(--bg-sidebar, rgba(0, 0, 0, 0.04));
+  color: var(--text-primary, #0f172a);
+}
+.group-data-[collapsible=icon] .sidebar-collapse-btn {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  margin-top: 8px;
+}
+.sidebar-collapse-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-new-chat-btn:hover {

@@ -367,7 +367,19 @@ async def _run_agent_and_publish(
                             # Prepend tool output to final content for DB persistence
                             save_content = final_content
                             if tool_output_content:
-                                save_content = tool_output_content + "\n\n<!-- INSIGHT -->\n\n" + final_content
+                                _err = (
+                                    "Query Syntax Issue",
+                                    "Query Not Permitted",
+                                    "Query Timeout",
+                                    "Query Execution Issue",
+                                    "Database Connection Unavailable",
+                                    "🚫",
+                                    "⚠️ Query",
+                                )
+                                if any(m in tool_output_content for m in _err):
+                                    save_content = tool_output_content
+                                else:
+                                    save_content = tool_output_content + "\n\n<!-- INSIGHT -->\n\n" + final_content
 
                             # Persist to DB
                             if save_content and not assistant_message_saved:

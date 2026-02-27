@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState } from "react"
-import { Menu, X, Plus, Trash2 } from 'lucide-react';
+import React from "react"
+import { Plus, Trash2, PanelLeft } from 'lucide-react';
 import {
     Sidebar as SidebarUI,
     SidebarContent as SidebarUIContent,
     SidebarHeader,
-    SidebarTrigger,
+    SidebarRail,
     useSidebar,
 } from '@/components/ui/sidebar';
 import { useConversations, useDeleteConversation } from '@/actions/useConversations';
@@ -39,10 +39,13 @@ function SidebarInnerContent({
 }: Omit<SidebarProps, 'isOpen' | 'onClose'>) {
     const { data: conversations, isLoading } = useConversations();
     const deleteConversation = useDeleteConversation();
-    const { setOpen } = useSidebar();
+    const { setOpen, state, toggleSidebar } = useSidebar();
+    const isDeleting = deleteConversation.isPending;
+    const isCollapsed = state === 'collapsed';
 
     const handleDelete = async (e: React.MouseEvent, threadId: string) => {
         e.stopPropagation();
+        if (isDeleting) return;
         if (confirm('Are you sure you want to delete this conversation?')) {
             deleteConversation.mutate(threadId);
             if (currentThreadId === threadId) {
@@ -54,32 +57,23 @@ function SidebarInnerContent({
     return (
         <>
             <SidebarHeader className="border-b">
-                {/* Logo and Trigger Row */}
-                <div className="sidebar-header-row">
-                    {/* Logo - always visible */}
+                {/* Logo + title only */}
+                <div className="sidebar-header-row sidebar-header-row-no-trigger">
                     <div className="sidebar-logo">
                         <img
                             src="/logo.png"
                             alt="L&T-IPMS"
                             className="w-8 h-8 object-contain"
                             onError={(e) => {
-                                // Fallback to text if image doesn't exist
                                 e.currentTarget.style.display = 'none';
                                 e.currentTarget.nextElementSibling?.classList.remove('hidden');
                             }}
                         />
                         <span className="hidden text-lg font-bold text-blue-600">LT</span>
                     </div>
-
-                    {/* Title - hidden when collapsed */}
                     <h1 className="sidebar-title group-data-[collapsible=icon]:hidden">
                         L&T-IPMS
                     </h1>
-
-                    {/* Sidebar Trigger - on right, hidden when collapsed, appears on hover */}
-                    <div className="sidebar-trigger-wrapper">
-                        <SidebarTrigger className="sidebar-trigger-btn" />
-                    </div>
                 </div>
 
                 {/* New Chat Button */}
@@ -92,6 +86,20 @@ function SidebarInnerContent({
                 >
                     <Plus size={18} />
                     <span className="group-data-[collapsible=icon]:hidden">New Chat</span>
+                </button>
+
+                {/* Collapse: below New Chat, always visible */}
+                <button
+                    type="button"
+                    onClick={toggleSidebar}
+                    className="sidebar-collapse-btn"
+                    aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                    title={isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
+                >
+                    <PanelLeft size={18} className={isCollapsed ? 'rotate-180' : ''} />
+                    <span className="sidebar-collapse-label group-data-[collapsible=icon]:hidden">
+                        Collapse sidebar
+                    </span>
                 </button>
             </SidebarHeader>
             <SidebarUIContent className="flex flex-col gap-1 p-3 group-data-[collapsible=icon]:hidden">
@@ -122,9 +130,12 @@ function SidebarInnerContent({
                                     </p>
                                 </div>
                                 <button
-                                    className="sidebar-conv-delete opacity-0 group-hover:opacity-100 p-1.5 rounded transition-all"
+                                    type="button"
+                                    className="sidebar-conv-delete opacity-70 hover:opacity-100 p-1.5 rounded transition-all disabled:opacity-50 disabled:pointer-events-none"
                                     onClick={(e) => handleDelete(e, conv.threadId)}
+                                    disabled={isDeleting}
                                     title="Delete conversation"
+                                    aria-label="Delete conversation"
                                 >
                                     <Trash2 size={14} />
                                 </button>
@@ -143,12 +154,13 @@ export function Sidebar({
     onNewChat,
 }: SidebarProps) {
     return (
-        <SidebarUI collapsible="icon">
+        <SidebarUI collapsible="icon" side="left">
             <SidebarInnerContent
                 currentThreadId={currentThreadId}
                 onSelectConversation={onSelectConversation}
                 onNewChat={onNewChat}
             />
+            <SidebarRail />
         </SidebarUI>
     );
 }

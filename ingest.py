@@ -6,23 +6,46 @@ Generic CSV -> Prisma ingestion for:
  - Tbl02ProjectActivity (tbl_02_project_activity)
  - Tbl03ProjectTask (tbl_03_project_task)
 
+Date parsing supports:
+ - ISO and common string formats (YYYY-MM-DD, MM/DD/YYYY, DD-MMM-YYYY, with optional time)
+ - Excel serial numbers (e.g. 44927 or 44927.5)
+ - DD:HH.M style (days:hours.tenths) as in some exports (e.g. 30:01.2, 00:00.0)
+
+File encoding: tried in order utf-8-sig, utf-8, cp1252, latin-1.
+
+Modes:
+  Append:  --summary / --activity / --task / --all  (add rows; existing rows kept)
+  Replace: --replace-summary / --replace-activity / --replace-task / --replace-all
+           (delete all rows in that table, then load full CSV)
+  Clear:   --clear-summary / --clear-activity / --clear-task  (delete all rows only)
+
 Usage:
-    python ingest.py --summary samples/tbl_01_project_summary.csv
-    python ingest.py --activity samples/tbl_02_project_activity.csv
-    python ingest.py --task samples/tbl_03_project_task.csv
-    python ingest.py --all <summary.csv> <activity.csv> <task.csv>
-    python ingest.py --clear-summary
-    python ingest.py --clear-activity
-    python ingest.py --clear-task
+    python ingest.py --summary [file]          # append summary
+    python ingest.py --activity [file]          # append activity
+    python ingest.py --task [file]             # append task
+    python ingest.py --all [summary] [activity] [task]   # append all three
+    python ingest.py --replace-summary [file]  # clear + load summary
+    python ingest.py --replace-activity [file] # clear + load activity
+    python ingest.py --replace-task [file]     # clear + load task
+    python ingest.py --replace-all [summary] [activity] [task]  # clear + load all
+    python ingest.py --clear-summary           # delete all summary rows
+    python ingest.py --clear-activity          # delete all activity rows
+    python ingest.py --clear-task              # delete all task rows
 """
 
 import asyncio
 import csv
+import io
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, get_args
+
+# Excel epoch (serial 0 = 1899-12-30)
+_EXCEL_EPOCH = datetime(1899, 12, 30)
+# Reference for DD:HH.M style (days:hours.tenths from this date)
+_DAYS_HOURS_EPOCH = datetime(1970, 1, 1)
 
 from dotenv import load_dotenv
 
@@ -36,17 +59,54 @@ from prisma.models import Tbl01ProjectSummary, Tbl02ProjectActivity, Tbl03Projec
 # Parsers / helpers
 # -------------------------
 def parse_nullable_date(date_str: str) -> datetime | None:
-    if not date_str or date_str.strip() == "" or date_str.strip().upper() in ("NULL", "NONE", "NA"):
+    if not date_str or (s := date_str.strip()) == "" or s.upper() in ("NULL", "NONE", "NA"):
         return None
-    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+    # Standard date string formats (date only)
+    for fmt in (
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%Y/%m/%d",
+        "%d-%b-%Y",
+        "%d-%B-%Y",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+    ):
         try:
-            return datetime.strptime(date_str.strip(), fmt)
+            dt = datetime.strptime(s, fmt)
+            return dt.replace(microsecond=0) if dt else None
         except Exception:
             continue
     try:
-        return datetime.fromisoformat(date_str.strip())
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt.replace(tzinfo=None, microsecond=0) if dt.tzinfo else dt.replace(microsecond=0)
     except Exception:
-        return None
+        pass
+    # Excel serial number (integer or float)
+    try:
+        n = float(s.replace(",", "."))
+        if 0 <= n < 1e6:
+            days = int(n)
+            frac = n - days
+            dt = _EXCEL_EPOCH + timedelta(days=days, seconds=round(86400 * frac))
+            return dt.replace(microsecond=0)
+    except Exception:
+        pass
+    # DD:HH.M or D:HH.M style (days : hours . tenths) as used in some exports
+    match = re.match(r"^\s*(\d+)\s*:\s*(\d{1,2})(?:\.(\d))?\s*$", s)
+    if match:
+        try:
+            days = int(match.group(1))
+            hours = int(match.group(2))
+            tenths = int(match.group(3) or 0)
+            dt = _DAYS_HOURS_EPOCH + timedelta(days=days, hours=hours, minutes=tenths * 6)
+            return dt.replace(microsecond=0)
+        except Exception:
+            pass
+    return None
 
 
 def parse_nullable_float(value: str) -> float | None:
@@ -208,62 +268,79 @@ async def ingest_generic(csv_path: str, prisma_model_attr: str, batch_size: int 
         if field_name not in ignored_fields and not _is_optional_type(field_type)
     }
 
-    with open(csv_file, "r", encoding="cp1252", newline="") as f:
-        reader = csv.DictReader(f)
-        headers = reader.fieldnames or []
-
-        header_map: dict[str, tuple[str, callable, bool]] = {}
-        unknown_headers = []
-        for header in headers:
-            model_field = header_to_camel(header)
-            if model_field in ignored_fields:
-                continue
-            if model_field not in known_fields:
-                unknown_headers.append(header)
-                continue
-            parser, is_optional = get_parser_for_type(model_field, model_class)
-            header_map[header] = (model_field, parser, is_optional)
-
-        if unknown_headers:
-            print(f"Ignoring {len(unknown_headers)} CSV headers not present in {prisma_model_attr}.")
-
-        records = []
-        total_inserted = 0
-        skipped = 0
-
-        for row_num, row in enumerate(reader, start=1):
+    def _open_csv(path: Path):
+        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
             try:
-                record = {}
-                for original_header, (model_field, parser, _) in header_map.items():
-                    record[model_field] = parser(row.get(original_header))
+                with open(path, "r", encoding=encoding, newline="") as f:
+                    return f.read(), encoding
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        raise ValueError(f"Could not decode {path} with utf-8, cp1252, or latin-1")
 
-                missing_required = [f for f in required_fields if record.get(f) is None]
-                if missing_required:
-                    skipped += 1
-                    print(f"Skipped row {row_num}: missing required fields {missing_required}")
-                    continue
+    try:
+        csv_content, used_encoding = _open_csv(csv_file)
+    except ValueError as e:
+        print(e)
+        await prisma.disconnect()
+        return
+    print(f"Using encoding: {used_encoding}")
 
-                records.append(record)
-            except Exception as e:
+    f = io.StringIO(csv_content)
+    reader = csv.DictReader(f)
+    headers = reader.fieldnames or []
+
+    header_map: dict[str, tuple[str, callable, bool]] = {}
+    unknown_headers = []
+    for header in headers:
+        model_field = header_to_camel(header)
+        if model_field in ignored_fields:
+            continue
+        if model_field not in known_fields:
+            unknown_headers.append(header)
+            continue
+        parser, is_optional = get_parser_for_type(model_field, model_class)
+        header_map[header] = (model_field, parser, is_optional)
+
+    if unknown_headers:
+        print(f"Ignoring {len(unknown_headers)} CSV headers not present in {prisma_model_attr}.")
+
+    records = []
+    total_inserted = 0
+    skipped = 0
+
+    for row_num, row in enumerate(reader, start=1):
+        try:
+            record = {}
+            for original_header, (model_field, parser, _) in header_map.items():
+                record[model_field] = parser(row.get(original_header))
+
+            missing_required = [f for f in required_fields if record.get(f) is None]
+            if missing_required:
                 skipped += 1
-                print(f"Skipped row {row_num} due to error: {e}")
+                print(f"Skipped row {row_num}: missing required fields {missing_required}")
                 continue
 
-            if len(records) >= batch_size:
-                try:
-                    await model_obj.create_many(data=records)
-                    total_inserted += len(records)
-                    print(f"Inserted {total_inserted} records into {prisma_model_attr}...")
-                except Exception as e:
-                    print(f"Error inserting batch at row {row_num}: {e}")
-                records = []
+            records.append(record)
+        except Exception as e:
+            skipped += 1
+            print(f"Skipped row {row_num} due to error: {e}")
+            continue
 
-        if records:
+        if len(records) >= batch_size:
             try:
                 await model_obj.create_many(data=records)
                 total_inserted += len(records)
+                print(f"Inserted {total_inserted} records into {prisma_model_attr}...")
             except Exception as e:
-                print(f"Error inserting final batch: {e}")
+                print(f"Error inserting batch at row {row_num}: {e}")
+            records = []
+
+    if records:
+        try:
+            await model_obj.create_many(data=records)
+            total_inserted += len(records)
+        except Exception as e:
+            print(f"Error inserting final batch: {e}")
 
     try:
         count = await model_obj.count()
@@ -352,9 +429,33 @@ if __name__ == "__main__":
             asyncio.run(ingest_tbl01_project_summary(summary_path))
             asyncio.run(ingest_tbl02_project_activity(activity_path))
             asyncio.run(ingest_tbl03_project_task(task_path))
+        elif cmd == "--replace-summary":
+            path = sys.argv[2] if len(sys.argv) > 2 else summary_csv_default
+            asyncio.run(clear_tbl01_project_summary())
+            asyncio.run(ingest_tbl01_project_summary(path))
+        elif cmd == "--replace-activity":
+            path = sys.argv[2] if len(sys.argv) > 2 else activity_csv_default
+            asyncio.run(clear_tbl02_project_activity())
+            asyncio.run(ingest_tbl02_project_activity(path))
+        elif cmd == "--replace-task":
+            path = sys.argv[2] if len(sys.argv) > 2 else task_csv_default
+            asyncio.run(clear_tbl03_project_task())
+            asyncio.run(ingest_tbl03_project_task(path))
+        elif cmd == "--replace-all":
+            summary_path = sys.argv[2] if len(sys.argv) > 2 else summary_csv_default
+            activity_path = sys.argv[3] if len(sys.argv) > 3 else activity_csv_default
+            task_path = sys.argv[4] if len(sys.argv) > 4 else task_csv_default
+            asyncio.run(clear_tbl01_project_summary())
+            asyncio.run(clear_tbl02_project_activity())
+            asyncio.run(clear_tbl03_project_task())
+            asyncio.run(ingest_tbl01_project_summary(summary_path))
+            asyncio.run(ingest_tbl02_project_activity(activity_path))
+            asyncio.run(ingest_tbl03_project_task(task_path))
         else:
             print(
-                "Usage: python ingest.py [--summary <file>|--activity <file>|--task <file>|--all <summary> <activity> <task>|--clear-summary|--clear-activity|--clear-task]"
+                "Usage: python ingest.py [--summary|--activity|--task|--all [files...] | "
+                "--replace-summary|--replace-activity|--replace-task|--replace-all [files...] | "
+                "--clear-summary|--clear-activity|--clear-task]"
             )
     else:
         asyncio.run(ingest_tbl01_project_summary(summary_csv_default))

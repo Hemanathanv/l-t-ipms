@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MapPin, Calendar, Building2, TrendingUp, Clock, FileSignature, AlertTriangle } from 'lucide-react';
+import { MapPin, Calendar, Building2, TrendingUp, Clock, FileSignature } from 'lucide-react';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatHeader } from '@/components/ChatHeader';
@@ -278,23 +278,6 @@ function ChatContainerInner({ initialThreadId }: ChatContainerProps) {
                                                     ? `${selectedProject.elapsed_days} of ${selectedProject.total_days} days elapsed`
                                                     : `${selectedProject.total_days} days total · ${selectedProject.elapsed_days} elapsed (${selectedProject.elapsed_days - selectedProject.total_days} days overrun)`
                                                 }
-                                            </p>
-                                        </div>
-                                    </div>
-                                )}
-                                {/* Max Forecast Delay (days) — PEI status: E / P / C / Overall */}
-                                {(selectedProject.max_forecast_delay_days_engineering != null || selectedProject.max_forecast_delay_days_construction != null || selectedProject.max_forecast_delay_days_procurement != null || selectedProject.max_forecast_delay_days_overall != null) && (
-                                    <div className="project-panel-row">
-                                        <AlertTriangle size={14} className="project-panel-row-icon" />
-                                        <div className="flex-1 min-w-0">
-                                            <p className="project-panel-label">Max Forecast Delay (days)</p>
-                                            <p className="project-panel-value text-[0.8rem]">
-                                                {[
-                                                    selectedProject.max_forecast_delay_days_engineering != null && `E: ${selectedProject.max_forecast_delay_days_engineering}`,
-                                                    selectedProject.max_forecast_delay_days_procurement != null && `P: ${selectedProject.max_forecast_delay_days_procurement}`,
-                                                    selectedProject.max_forecast_delay_days_construction != null && `C: ${selectedProject.max_forecast_delay_days_construction}`,
-                                                    selectedProject.max_forecast_delay_days_overall != null && `Overall: ${selectedProject.max_forecast_delay_days_overall}`,
-                                                ].filter(Boolean).join(' · ')}
                                             </p>
                                         </div>
                                     </div>

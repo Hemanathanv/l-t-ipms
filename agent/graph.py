@@ -64,6 +64,7 @@ SYSTEM_PROMPT = """You are an intelligent AI assistant for L&T IPMS (Integrated 
    - "Explain CPI calculation"
    - "How are metrics calculated?"
 
+
 ## STRICT RULES:
 
 1. **DO NOT HALLUCINATE**: Only answer questions you have tools for. If asked something outside the scope of these tools, politely say you can only help with SRA-related queries.
@@ -152,21 +153,36 @@ If the project is on track, say so briefly. If there are issues, be specific abo
 """
 
 
+# Substrings that indicate tool returned an error — do not run AI insight
+_TOOL_ERROR_MARKERS = (
+    "Query Syntax Issue",
+    "Query Not Permitted",
+    "Query Timeout",
+    "Query Execution Issue",
+    "Database Connection Unavailable",
+    "🚫",
+    "⚠️ Query",
+)
+
+
 async def insights_node(state: AgentState) -> dict:
     """
     Insights node — synthesizes raw tool output into actionable insight.
     Calls LLM WITHOUT tools bound (pure synthesis, no tool-calling).
+    If the last tool output is an error (e.g. SQL failure), pass it through without insight.
     """
     messages = list(state["messages"])
-    
+    # Find last tool output
+    tool_content = ""
+    for m in reversed(messages):
+        if isinstance(m, ToolMessage):
+            tool_content = m.content if hasattr(m, "content") else str(m)
+            break
+    if any(marker in tool_content for marker in _TOOL_ERROR_MARKERS):
+        return {"messages": [AIMessage(content=tool_content)]}
     llm = get_llm()  # No tools bound
-    
-    # Build messages with insight-focused system prompt
     insight_messages = [SystemMessage(content=INSIGHT_SYSTEM_PROMPT)] + messages
-    
-    # Use ainvoke directly so astream_events captures on_chat_model_stream
     response = await llm.ainvoke(insight_messages)
-    
     return {"messages": [response]}
 
 
