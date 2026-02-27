@@ -49,7 +49,417 @@ from typing import Optional
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+
 from db import get_prisma
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  SCHEMA REGISTRY  —  Single Source of Truth derived from schema.prisma
+# ═════════════════════════════════════════════════════════════════════════════
+"""
+Every entry below maps the Prisma camelCase field name (used by the 16
+structured tools via the Prisma client) to its exact PostgreSQL column name
+(the @map value from schema.prisma, used by the SQL fallback agent).
+
+Rule:
+  • Structured tools  → use Prisma camelCase  (ps.spiOverall)
+  • SQL fallback agent → use col(TBL01, "spiOverall")  which resolves to  "SPI_Overall"
+
+Both paths are validated against the same registry so a schema change only
+needs to be updated here.
+"""
+
+# ── Table identifiers ─────────────────────────────────────────────────────────
+TBL01 = "tbl_01_project_summary"
+TBL02 = "tbl_02_project_activity"
+TBL03 = "tbl_03_project_task"
+
+# ── Prisma camelCase  →  DB PascalCase_With_Underscores (@map values) ─────────
+_FIELD_MAP: dict[str, dict[str, str]] = {
+
+    # ── tbl_01_project_summary ────────────────────────────────────────────────
+    TBL01: {
+        "projectKey":                          "Project_Key",
+        "projectId":                           "Project_ID",
+        "projectName":                         "Project_Name",
+        "projectLocation":                     "Project_Location",
+        "projectManager":                      "Project_Manager",
+        "projectManagerDesignation":           "Project_Manager_Designation",
+        "dashboardAsondate":                   "Dashboard_AsOnDate",
+        "baselineStartDate":                   "Baseline_Start_Date",
+        "baselineFinishDate":                  "Baseline_Finish_Date",
+        "forecastStartDate":                   "Forecast_Start_Date",
+        "forecastFinishDate":                  "Forecast_Finish_Date",
+        "actualStartDate":                     "Actual_Start_Date",
+        "contractualCompletionDate":           "Contractual_Completion_Date",
+        "baselineDurationDays":                "Baseline_Duration_Days",
+        "forecastDurationDays":                "Forecast_Duration_Days",
+        "adjustedTotalDurationDays":           "Adjusted_Total_Duration_Days",
+        "slipDays":                            "Slip_Days",
+        "scheduleVarianceDays":                "Schedule_Variance_Days",
+        "projectExecutionIndex":               "Project_Execution_Index",
+        "daysToContractualEnd":                "Days_To_Contractual_End",
+        "daysToForecastEnd":                   "Days_To_Forecast_End",
+        "eotBufferDays":                       "EOT_Buffer_Days",
+        "projectAgeDays":                      "Project_Age_Days",
+        "projectElapsedPct":                   "Project_Elapsed_Pct",
+        "eotRagStatus":                        "EOT_RAG_Status",
+        "scheduleRecoveryDays":                "Schedule_Recovery_Days",
+        "jcrApprovedDate":                     "JCR_Approved_Date",
+        "pmsApprovedDate":                     "PMS_Approved_Date",
+        "rescheduledDate":                     "Rescheduled_Date",
+        "baselineVsRescheduledSlip":           "Baseline_vs_Rescheduled_Slip",
+        "currentVsRescheduledSlip":            "Current_vs_Rescheduled_Slip",
+        "baselineIntegrityLabel":              "Baseline_Integrity_Label",
+        "eotExposureDays":                     "EOT_Exposure_Days",
+        "maxForecastDelayDaysEngineering":     "Max_Forecast_Delay_Days_Engineering",
+        "maxForecastDelayDaysProcurement":     "Max_Forecast_Delay_Days_Procurement",
+        "maxForecastDelayDaysConstruction":    "Max_Forecast_Delay_Days_Construction",
+        "maxForecastDelayDaysOverall":         "Max_Forecast_Delay_Days_Overall",
+        "spiOverall":                          "SPI_Overall",
+        "spiEngineering":                      "SPI_Engineering",
+        "spiProcurement":                      "SPI_Procurement",
+        "spiConstruction":                     "SPI_Construction",
+        "cumulativePlannedPctOverall":         "Cumulative_Planned_Pct_Overall",
+        "cumulativeActualPctOverall":          "Cumulative_Actual_Pct_Overall",
+        "cumulativeBacklogPctOverall":         "Cumulative_Backlog_Pct_Overall",
+        "cumulativePlannedPctEngineering":     "Cumulative_Planned_Pct_Engineering",
+        "cumulativeActualPctEngineering":      "Cumulative_Actual_Pct_Engineering",
+        "cumulativeBacklogPctEngineering":     "Cumulative_Backlog_Pct_Engineering",
+        "cumulativePlannedPctProcurement":     "Cumulative_Planned_Pct_Procurement",
+        "cumulativeActualPctProcurement":      "Cumulative_Actual_Pct_Procurement",
+        "cumulativeBacklogPctProcurement":     "Cumulative_Backlog_Pct_Procurement",
+        "cumulativePlannedPctConstruction":    "Cumulative_Planned_Pct_Construction",
+        "cumulativeActualPctConstruction":     "Cumulative_Actual_Pct_Construction",
+        "cumulativeBacklogPctConstruction":    "Cumulative_Backlog_Pct_Construction",
+        "spiRagStatus":                        "SPI_RAG_Status",
+        "progressGapPct":                      "Progress_Gap_Pct",
+        "weakestDomain":                       "Weakest_Domain",
+        "floatTotalTaskCount":                 "Float_Total_Task_Count",
+        "floatNegativeTaskCount":              "Float_Negative_Task_Count",
+        "floatZeroTaskCount":                  "Float_Zero_Task_Count",
+        "floatNearCriticalTaskCount":          "Float_Near_Critical_Task_Count",
+        "floatPositiveTaskCount":              "Float_Positive_Task_Count",
+        "floatAvgDays":                        "Float_Avg_Days",
+        "floatMinDays":                        "Float_Min_Days",
+        "floatAtRiskPct":                      "Float_At_Risk_Pct",
+        "negFloatPct":                         "Neg_Float_Pct",
+        "zeroFloatPct":                        "Zero_Float_Pct",
+        "nearCritFloatPct":                    "Near_Crit_Float_Pct",
+        "healthyFloatPct":                     "Healthy_Float_Pct",
+        "floatHealthPct":                      "Float_Health_Pct",
+        "floatRagStatus":                      "Float_RAG_Status",
+        "cpTaskCount":                         "CP_Task_Count",
+        "cpPctOfTotal":                        "CP_Pct_Of_Total",
+        "cpTighteningScore":                   "CP_Tightening_Score",
+        "cadOverall":                          "CAD_Overall",
+        "cadEngineering":                      "CAD_Engineering",
+        "cadProcurement":                      "CAD_Procurement",
+        "cadConstruction":                     "CAD_Construction",
+        "workfrontReadinessOverallPct":        "Workfront_Readiness_Overall_Pct",
+        "workfrontReadinessEngineeringPct":    "Workfront_Readiness_Engineering_Pct",
+        "workfrontReadinessProcurementPct":    "Workfront_Readiness_Procurement_Pct",
+        "workfrontReadinessConstructionPct":   "Workfront_Readiness_Construction_Pct",
+        "executableProgressOverallPct":        "Executable_Progress_Overall_Pct",
+        "executableProgressEngineeringPct":    "Executable_Progress_Engineering_Pct",
+        "executableProgressProcurementPct":    "Executable_Progress_Procurement_Pct",
+        "executableProgressConstructionPct":   "Executable_Progress_Construction_Pct",
+        "contributionToProjectOverallPct":     "Contribution_To_Project_Overall_Pct",
+        "contributionToProjectEngineeringPct": "Contribution_To_Project_Engineering_Pct",
+        "contributionToProjectProcurementPct": "Contribution_To_Project_Procurement_Pct",
+        "contributionToProjectConstructionPct":"Contribution_To_Project_Construction_Pct",
+        "activitiesTotalCount":                "Activities_Total_Count",
+        "activitiesCompleteCount":             "Activities_Complete_Count",
+        "activitiesInProgressCount":           "Activities_In_Progress_Count",
+        "activitiesOverdueCount":              "Activities_Overdue_Count",
+        "activitiesNotYetDueCount":            "Activities_Not_Yet_Due_Count",
+        "activitiesCompletionRatePct":         "Activities_Completion_Rate_Pct",
+        "activitiesOverdueRatePct":            "Activities_Overdue_Rate_Pct",
+        "conLacWeekPct":                       "CON_LAC_Week_Pct",
+        "conLacMonthPct":                      "CON_LAC_Month_Pct",
+        "conLacCompletedRules":                "CON_LAC_Completed_Rules",
+        "conLacOverdueCount":                  "CON_LAC_Overdue_Count",
+        "conLacAtRisk7dayCount":               "CON_LAC_At_Risk_7Day_Count",
+        "conLacAtRisk30dayCount":              "CON_LAC_At_Risk_30Day_Count",
+        "conLacPendingCount":                  "CON_LAC_Pending_Count",
+        "conLacRag":                           "CON_LAC_RAG",
+        "prcLacWeekPct":                       "PRC_LAC_Week_Pct",
+        "prcLacMonthPct":                      "PRC_LAC_Month_Pct",
+        "prcLacCompletedRules":                "PRC_LAC_Completed_Rules",
+        "prcLacOverdueCount":                  "PRC_LAC_Overdue_Count",
+        "prcLacAtRisk7dayCount":               "PRC_LAC_At_Risk_7Day_Count",
+        "prcLacAtRisk30dayCount":              "PRC_LAC_At_Risk_30Day_Count",
+        "prcLacPendingCount":                  "PRC_LAC_Pending_Count",
+        "prcLacRag":                           "PRC_LAC_RAG",
+        "activitiesStarting2w":                "Activities_Starting_2W",
+        "activitiesFinishing2w":               "Activities_Finishing_2W",
+        "activitiesStarting4w":                "Activities_Starting_4W",
+        "delayRiskLabel":                      "Delay_Risk_Label",
+        "delayHotspotDomain":                  "Delay_Hotspot_Domain",
+        "delayConcentrationDomain":            "Delay_Concentration_Domain",
+        "scenarioBaseSpi":                     "Scenario_Base_SPI",
+        "forecastFinishIfSpi1":                "Forecast_Finish_If_SPI1",
+        "forecastFinishAtCurrentSpi":          "Forecast_Finish_At_Current_SPI",
+        "recoveryDaysNeeded":                  "Recovery_Days_Needed",
+        "recoverySpiRequired":                 "Recovery_SPI_Required",
+        "recoveryPlanStatus":                  "Recovery_Plan_Status",
+        "compressionHeadroomPct":              "Compression_Headroom_Pct",
+        "dataAgeDays":                         "Data_Age_Days",
+        "dataFreshnessLabel":                  "Data_Freshness_Label",
+        "eotEligibilityLabel":                 "EOT_Eligibility_Label",
+        "scheduleHealthScore":                 "Schedule_Health_Score",
+        "scheduleHealthRag":                   "Schedule_Health_RAG",
+    },
+
+    # ── tbl_02_project_activity ───────────────────────────────────────────────
+    TBL02: {
+        "projectKey":                   "Project_Key",
+        "activityCode":                 "Activity_Code",
+        "activityDescription":          "Activity_Description",
+        "workpackage":                  "Workpackage",
+        "location":                     "Location",
+        "domain":                       "Domain",
+        "domainCode":                   "Domain_Code",
+        "scurve":                       "SCurve",
+        "totalTaskCount":               "Total_Task_Count",
+        "workfrontReadyCount":          "Workfront_Ready_Count",
+        "baselineStartDate":            "Baseline_Start_Date",
+        "baselineFinishDate":           "Baseline_Finish_Date",
+        "forecastStartDate":            "Forecast_Start_Date",
+        "forecastFinishDate":           "Forecast_Finish_Date",
+        "actualStartDate":              "Actual_Start_Date",
+        "actualFinishDate":             "Actual_Finish_Date",
+        "baselineDurationDays":         "Baseline_Duration_Days",
+        "forecastDurationDays":         "Forecast_Duration_Days",
+        "adjustedTotalDurationDays":    "Adjusted_Total_Duration_Days",
+        "slipDays":                     "Slip_Days",
+        "scheduleVarianceDays":         "Schedule_Variance_Days",
+        "activityStatus":               "Activity_Status",
+        "daysToForecastFinish":         "Days_To_Forecast_Finish",
+        "startDelayDays":               "Start_Delay_Days",
+        "durationOverrunDays":          "Duration_Overrun_Days",
+        "timeProgressGapPct":           "Time_Progress_Gap_Pct",
+        "totalFloatDays":               "Total_Float_Days",
+        "isCriticalWrench":             "Is_Critical_Wrench",
+        "projectMinFloatDays":          "Project_Min_Float_Days",
+        "isControllingFloatActivity":   "Is_Controlling_Float_Activity",
+        "floatHealthStatus":            "Float_Health_Status",
+        "floatHealthSortOrder":         "Float_Health_Sort_Order",
+        "floatRagLabel":                "Float_RAG_Label",
+        "floatPctOfProjectMin":         "Float_Pct_Of_Project_Min",
+        "criticalActivityDensityPct":   "Critical_Activity_Density_Pct",
+        "workfrontReadyPct":            "Workfront_Ready_Pct",
+        "workfrontGapCount":            "Workfront_Gap_Count",
+        "cadBreachFlag":                "CAD_Breach_Flag",
+        "plannedProgressPct":           "Planned_Progress_Pct",
+        "actualProgressPct":            "Actual_Progress_Pct",
+        "forecastProgressPct":          "Forecast_Progress_Pct",
+        "progressVariancePct":          "Progress_Variance_Pct",
+        "plannedQuantity":              "Planned_Quantity",
+        "earnedQuantity":               "Earned_Quantity",
+        "executableProgressPct":        "Executable_Progress_Pct",
+        "contributionToProjectPct":     "Contribution_To_Project_Pct",
+        "activitySpi":                  "Activity_SPI",
+        "spiRagLabel":                  "SPI_RAG_Label",
+        "requiredProgressRatePerDay":   "Required_Progress_Rate_Per_Day",
+        "remainingQuantity":            "Remaining_Quantity",
+        "forecastDelayDays":            "Forecast_Delay_Days",
+        "cpmDelayBreachFlag":           "CPM_Delay_Breach_Flag",
+        "delayMagnitudeLabel":          "Delay_Magnitude_Label",
+        "cumulativePlannedProgress":    "Cumulative_Planned_Progress",
+        "cumulativeActualProgress":     "Cumulative_Actual_Progress",
+        "cumulativeBacklogPct":         "Cumulative_Backlog_Pct",
+        "domainSpi":                    "Domain_SPI",
+        "conTotalRules":                "CON_Total_Rules",
+        "conCompletedRules":            "CON_Completed_Rules",
+        "conOverdueRules":              "CON_Overdue_Rules",
+        "conAtRiskRules7day":           "CON_At_Risk_Rules_7Day",
+        "conAtRiskRules30day":          "CON_At_Risk_Rules_30Day",
+        "conPendingRules":              "CON_Pending_Rules",
+        "conLacWeekPct":                "CON_LAC_Week_Pct",
+        "conLacMonthPct":               "CON_LAC_Month_Pct",
+        "conLacRag":                    "CON_LAC_RAG",
+        "prcTotalRules":                "PRC_Total_Rules",
+        "prcCompletedRules":            "PRC_Completed_Rules",
+        "prcOverdueRules":              "PRC_Overdue_Rules",
+        "prcAtRiskRules7day":           "PRC_At_Risk_Rules_7Day",
+        "prcAtRiskRules30day":          "PRC_At_Risk_Rules_30Day",
+        "prcPendingRules":              "PRC_Pending_Rules",
+        "prcLacWeekPct":                "PRC_LAC_Week_Pct",
+        "prcLacMonthPct":               "PRC_LAC_Month_Pct",
+        "prcLacRag":                    "PRC_LAC_RAG",
+        "cpLabel":                      "CP_Label",
+        "floatVsProjectMin":            "Float_Vs_Project_Min",
+        "floatErosionFlag":             "Float_Erosion_Flag",
+        "in2wStartWindow":              "In_2W_Start_Window",
+        "in2wFinishWindow":             "In_2W_Finish_Window",
+        "in4wStartWindow":              "In_4W_Start_Window",
+        "lookaheadPriorityScore":       "LookAhead_Priority_Score",
+        "baselineDriftLabel":           "Baseline_Drift_Label",
+        "scheduleVarianceLabel":        "Schedule_Variance_Label",
+        "delaySourceLabel":             "Delay_Source_Label",
+        "constraintDelayDays":          "Constraint_Delay_Days",
+        "isConstraintBottleneck":       "Is_Constraint_Bottleneck",
+        "delaySeverityLabel":           "Delay_Severity_Label",
+        "compoundRiskScore":            "Compound_Risk_Score",
+        "riskWatchFlag":                "Risk_Watch_Flag",
+        "whatifDelayImpactDays":        "WhatIf_Delay_Impact_Days",
+        "accelerationNeededDays":       "Acceleration_Needed_Days",
+        "spiRequiredForRecovery":       "SPI_Required_For_Recovery",
+        "recoveryFeasibilityLabel":     "Recovery_Feasibility_Label",
+        "crashCandidateFlag":           "Crash_Candidate_Flag",
+        "fasttrackCandidateFlag":       "FastTrack_Candidate_Flag",
+        "activityHealthScore":          "Activity_Health_Score",
+        "activityHealthRag":            "Activity_Health_RAG",
+        "reportFlag":                   "Report_Flag",
+        "narrativePriority":            "Narrative_Priority",
+    },
+
+    # ── tbl_03_project_task ───────────────────────────────────────────────────
+    TBL03: {
+        "projectKey":                   "Project_Key",
+        "taskKey":                      "Task_Key",
+        "taskName":                     "Task_Name",
+        "activityCode":                 "Activity_Code",
+        "activityDescription":          "Activity_Description",
+        "workpackage":                  "Workpackage",
+        "location":                     "Location",
+        "domain":                       "Domain",
+        "domainCode":                   "Domain_Code",
+        "scurve":                       "SCurve",
+        "isSummary":                    "Is_Summary",
+        "isMilestone":                  "Is_Milestone",
+        "isCritical":                   "Is_Critical",
+        "isWorkfrontAvailable":         "Is_WorkFront_Available",
+        "baselineStartDate":            "Baseline_Start_Date",
+        "baselineFinishDate":           "Baseline_Finish_Date",
+        "forecastStartDate":            "Forecast_Start_Date",
+        "forecastFinishDate":           "Forecast_Finish_Date",
+        "actualStartDate":              "Actual_Start_Date",
+        "actualFinishDate":             "Actual_Finish_Date",
+        "baselineDurationDays":         "Baseline_Duration_Days",
+        "forecastDurationDays":         "Forecast_Duration_Days",
+        "adjustedTotalDurationDays":    "Adjusted_Total_Duration_Days",
+        "slipDays":                     "Slip_Days",
+        "scheduleVarianceDays":         "Schedule_Variance_Days",
+        "taskStatus":                   "Task_Status",
+        "daysToForecastFinish":         "Days_To_Forecast_Finish",
+        "startDelayDays":               "Start_Delay_Days",
+        "durationOverrunDays":          "Duration_Overrun_Days",
+        "actualDurationDays":           "Actual_Duration_Days",
+        "totalFloatDays":               "Total_Float_Days",
+        "isCriticalWrench":             "Is_Critical_Wrench",
+        "projectMinFloatDays":          "Project_Min_Float_Days",
+        "isControllingFloatTask":       "Is_Controlling_Float_Task",
+        "floatHealthStatus":            "Float_Health_Status",
+        "floatHealthSortOrder":         "Float_Health_Sort_Order",
+        "floatRagLabel":                "Float_RAG_Label",
+        "plannedProgressPct":           "Planned_Progress_Pct",
+        "actualProgressPct":            "Actual_Progress_Pct",
+        "forecastProgressPct":          "Forecast_Progress_Pct",
+        "progressVariancePct":          "Progress_Variance_Pct",
+        "plannedQuantity":              "Planned_Quantity",
+        "earnedQuantity":               "Earned_Quantity",
+        "executableProgressPct":        "Executable_Progress_Pct",
+        "contributionToProjectPct":     "Contribution_To_Project_Pct",
+        "taskSpi":                      "Task_SPI",
+        "taskSpiRagLabel":              "Task_SPI_RAG_Label",
+        "remainingQuantity":            "Remaining_Quantity",
+        "requiredRatePerDay":           "Required_Rate_Per_Day",
+        "forecastDelayDays":            "Forecast_Delay_Days",
+        "cpmDelayBreachFlag":           "CPM_Delay_Breach_Flag",
+        "cumulativePlannedProgress":    "Cumulative_Planned_Progress",
+        "cumulativeActualProgress":     "Cumulative_Actual_Progress",
+        "cumulativeBacklogPct":         "Cumulative_Backlog_Pct",
+        "domainSpi":                    "Domain_SPI",
+        "conTotalRules":                "CON_Total_Rules",
+        "conCompletedRules":            "CON_Completed_Rules",
+        "conOverdueRules":              "CON_Overdue_Rules",
+        "conAtRiskRules7day":           "CON_At_Risk_Rules_7Day",
+        "conAtRiskRules30day":          "CON_At_Risk_Rules_30Day",
+        "conPendingRules":              "CON_Pending_Rules",
+        "conLacWeekPct":                "CON_LAC_Week_Pct",
+        "conLacMonthPct":               "CON_LAC_Month_Pct",
+        "prcTotalRules":                "PRC_Total_Rules",
+        "prcCompletedRules":            "PRC_Completed_Rules",
+        "prcOverdueRules":              "PRC_Overdue_Rules",
+        "prcAtRiskRules7day":           "PRC_At_Risk_Rules_7Day",
+        "prcAtRiskRules30day":          "PRC_At_Risk_Rules_30Day",
+        "prcPendingRules":              "PRC_Pending_Rules",
+        "prcLacWeekPct":                "PRC_LAC_Week_Pct",
+        "prcLacMonthPct":               "PRC_LAC_Month_Pct",
+        "lacRagLabel":                  "LAC_RAG_Label",
+        "cpStatusLabel":                "CP_Status_Label",
+        "floatErosionFlag":             "Float_Erosion_Flag",
+        "in2wStartWindow":              "In_2W_Start_Window",
+        "in4wStartWindow":              "In_4W_Start_Window",
+        "in2wFinishWindow":             "In_2W_Finish_Window",
+        "lookaheadPriorityScore":       "LookAhead_Priority_Score",
+        "workfrontBlockFlag":           "Workfront_Block_Flag",
+        "taskBaselineDriftLabel":       "Task_Baseline_Drift_Label",
+        "taskDelaySourceLabel":         "Task_Delay_Source_Label",
+        "milestoneStatusLabel":         "Milestone_Status_Label",
+        "taskRiskScore":                "Task_Risk_Score",
+        "taskRiskTier":                 "Task_Risk_Tier",
+        "delayAttributionLabel":        "Delay_Attribution_Label",
+        "taskAccelerationDays":         "Task_Acceleration_Days",
+        "taskRecoverySpiRequired":      "Task_Recovery_SPI_Required",
+        "recoveryFeasibilityLabel":     "Recovery_Feasibility_Label",
+        "crashCandidateFlag":           "Crash_Candidate_Flag",
+        "fasttrackCandidateFlag":       "FastTrack_Candidate_Flag",
+        "taskAccountabilityLabel":      "Task_Accountability_Label",
+        "taskHealthScore":              "Task_Health_Score",
+        "taskHealthRag":                "Task_Health_RAG",
+        "asBuiltDurationDays":          "As_Built_Duration_Days",
+        "durationVarianceDays":         "Duration_Variance_Days",
+        "taskReportFlag":               "Task_Report_Flag",
+        "narrativeContributionLabel":   "Narrative_Contribution_Label",
+    },
+}
+
+
+def col(table: str, prisma_field: str) -> str:
+    """
+    Resolve Prisma camelCase field → quoted PostgreSQL column identifier.
+
+    Usage in SQL agent:
+        col(TBL01, "spiOverall")          → '"SPI_Overall"'
+        col(TBL02, "forecastDelayDays")   → '"Forecast_Delay_Days"'
+        col(TBL03, "isCriticalWrench")    → '"Is_Critical_Wrench"'
+
+    Raises KeyError if the field is not in the schema (prevents hallucination).
+    """
+    tbl_map = _FIELD_MAP.get(table)
+    if tbl_map is None:
+        raise KeyError(f"Unknown table '{table}'. Use TBL01 / TBL02 / TBL03 constants.")
+    db_col = tbl_map.get(prisma_field)
+    if db_col is None:
+        raise KeyError(
+            f"Field '{prisma_field}' not found in schema for table '{table}'. "
+            f"Valid fields: {sorted(tbl_map.keys())}"
+        )
+    return f'"{db_col}"'
+
+
+def cols(table: str, *prisma_fields: str) -> str:
+    """Resolve multiple fields and return a comma-separated quoted column list."""
+    return ", ".join(col(table, f) for f in prisma_fields)
+
+
+def tbl(table: str) -> str:
+    """Return schema-qualified table name."""
+    return f"public.{table}"
+
+
+def db_col_name(table: str, prisma_field: str) -> str:
+    """Return the raw DB column string (unquoted) — useful for ORDER BY with aliases."""
+    return _FIELD_MAP[table][prisma_field]
+
+
+def schema_cols(table: str) -> list[str]:
+    """Return all DB column names for a table — useful for SELECT * equivalents."""
+    return list(_FIELD_MAP[table].values())
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -210,7 +620,7 @@ async def sra_status_pei(
             EOT exposure | Workfront readiness | Schedule Health RAG
     """
     prisma = await get_prisma()
-    
+
     if not project_key:
         pl = await _list_projects(prisma)
         return (
@@ -542,8 +952,8 @@ async def sra_task_lookahead(
                     f"| {t.lookaheadPriorityScore:.1f} "
                     f"| {cp} |\n"
                 )
-            else:
-                resp += "No workfront-available tasks in the look-ahead window.\n"
+        else:
+            resp += "No workfront-available tasks in the look-ahead window.\n"
 
         resp += "\n### Workfront-Constrained Tasks — Action Required ⚠️\n\n"
         if wf_blocked:
@@ -559,8 +969,8 @@ async def sra_task_lookahead(
                     f"| {_d(t.totalFloatDays)} "
                     f"| {'🚧 Blocked' if t.workfrontBlockFlag else 'Constrained'} |\n"
                 )
-            else:
-                resp += "No workfront-constrained tasks in the look-ahead window.\n"
+        else:
+            resp += "No workfront-constrained tasks in the look-ahead window.\n"
 
         return resp + _threshold_footer()
 
@@ -652,7 +1062,7 @@ async def sra_critical_path(project_key: Optional[str] = None) -> str:
             resp += f"\n⚠️ **{len(neg_float_tasks)} tasks carry negative float** — these represent schedule overruns that have already materialised on the critical path and require immediate triage.\n"
 
         return resp + _threshold_footer()
-        
+
     except ValueError:
         return f"Invalid project key `{project_key}`."
     except Exception as e:
@@ -681,7 +1091,7 @@ async def sra_float_analysis(
     and controlling float activities at both activity and task grain.
     """
     prisma = await get_prisma()
-    
+
     if not project_key:
         pl = await _list_projects(prisma)
         return f"📋 **Specify the project for float analysis.**\n\n{pl}"
@@ -944,7 +1354,7 @@ async def sra_baseline_management(project_key: Optional[str] = None) -> str:
             resp += "✅ All activities are tracking within their approved baseline parameters.\n"
 
         return resp + _threshold_footer()
-        
+
     except ValueError:
         return f"Invalid project key `{project_key}`."
     except Exception as e:
@@ -1061,7 +1471,7 @@ async def sra_drill_delay(
     and delay severity labels.
     """
     prisma = await get_prisma()
-    
+
     if not project_key:
         pl = await _list_projects(prisma)
         return (
@@ -1308,7 +1718,7 @@ async def sra_eot_exposure(project_key: Optional[str] = None) -> str:
             resp += f"✅ The project retains {buffer_days} days of contractual buffer. Continued performance monitoring is required to preserve this position.\n"
 
         return resp + _threshold_footer()
-        
+
     except ValueError:
         return f"Invalid project key `{project_key}`."
     except Exception as e:
@@ -1341,7 +1751,7 @@ async def sra_recovery_advise(
     based on the project's current position.
     """
     prisma = await get_prisma()
-    
+
     if not project_key:
         pl = await _list_projects(prisma)
         return (
@@ -1570,7 +1980,7 @@ async def sra_create_action(
     ✅ "Assign fast-tracking decision to the planning team"
     """
     prisma = await get_prisma()
-    
+
     missing = []
     if not project_key:
         pl = await _list_projects(prisma)
@@ -1742,7 +2152,7 @@ async def sra_accountability_trace(
             resp += "Insufficient as-built data for completed task variance analysis in the selected scope.\n"
 
         return resp + _threshold_footer()
-        
+
     except ValueError:
         return f"Invalid project key `{project_key}`."
     except Exception as e:
@@ -1942,16 +2352,6 @@ _UNSAFE_PATTERNS = _re.compile(
 _SUPPRESS_COLS = {"id", "created_at", "updated_at"}
 
 
-def _q(name: str) -> str:
-    """Quote a PostgreSQL identifier (column/table) so mixed-case and reserved words work."""
-    return f'"{name}"'
-
-
-def _t(table: str) -> str:
-    """Schema-qualified table name for PostgreSQL."""
-    return f"public.{table}"
-
-
 def _sanitise_sql(sql: str) -> tuple[bool, str]:
     """
     Returns (is_safe, reason).
@@ -2023,9 +2423,9 @@ class SRASqlAgentInput(BaseModel):
     raw_sql: Optional[str] = Field(
         None,
         description=(
-            "Optional: a raw SQL SELECT. Use ONLY column names that exist in the schema below; "
-            "do NOT invent or assume column names (e.g. tbl_01 has NO Domain, Start_Date, End_Date, Status). "
-            "Use double-quoted identifiers and schema-qualified tables. Only SELECT is permitted."
+            "Optional: a raw SQL SELECT statement to execute directly. "
+            "If not provided, the agent will synthesise SQL from the question. "
+            "Only SELECT statements are permitted."
         )
     )
 
@@ -2038,10 +2438,6 @@ async def sra_sql_agent(
 ) -> str:
     """
     LAYER 0 — SQL Fallback Agent | Ad-Hoc Schedule Data Queries.
-
-    DO NOT HALLUCINATE FIELDS: Use ONLY column names that exist in the schema below.
-    Never invent, assume, or guess column names (e.g. tbl_01_project_summary has NO
-    "Domain", "Start_Date", "End_Date", or "Status" — use the exact names listed).
 
     This is the UNIVERSAL FALLBACK for any schedule question that cannot
     be served by the 16 structured tools.
@@ -2076,31 +2472,12 @@ async def sra_sql_agent(
     SAFETY: Only SELECT statements execute. All DML is blocked.
     ROW CAP: Results are capped at 500 rows.
 
-    DATABASE TABLES — use ONLY these column names (never invent fields):
+    DATABASE TABLES (PostgreSQL):
+      tbl_01_project_summary   — Project_Key, SPI_Overall, PEI, EOT_Exposure_Days, ...
+      tbl_02_project_activity  — Project_Key, Activity_Code, Domain_Code, Float_Days, ...
+      tbl_03_project_task      — Project_Key, Task_Key, Activity_Code, Float_Days, ...
 
-      public.tbl_01_project_summary (one row per project):
-        Allowed: "Project_Key", "Project_Name", "Project_Location", "Baseline_Start_Date",
-        "Baseline_Finish_Date", "Actual_Start_Date", "Forecast_Start_Date", "Forecast_Finish_Date",
-        "SPI_Overall", "Schedule_Health_RAG", "Project_Execution_Index", "EOT_Exposure_Days",
-        "Max_Forecast_Delay_Days_Overall", "Data_Freshness_Label", "Schedule_Health_Score",
-        "Weakest_Domain", "EOT_RAG_Status", "Contractual_Completion_Date", "Slip_Days",
-        "Schedule_Variance_Days", "Dashboard_AsOnDate", "Project_Manager", "Project_ID".
-        FORBIDDEN on this table: Domain, Start_Date, End_Date, Status (do not use).
-
-      public.tbl_02_project_activity (one row per activity):
-        Allowed: "Project_Key", "Activity_Code", "Activity_Description", "Domain", "Domain_Code",
-        "Baseline_Start_Date", "Baseline_Finish_Date", "Forecast_Start_Date", "Forecast_Finish_Date",
-        "Actual_Start_Date", "Actual_Finish_Date", "Activity_Status", "Forecast_Delay_Days",
-        "Total_Float_Days", "Slip_Days", "Is_Critical_Wrench", etc.
-
-      public.tbl_03_project_task (one row per task):
-        Allowed: "Project_Key", "Task_Key", "Task_Name", "Activity_Code", "Domain_Code",
-        "Task_Status", "Total_Float_Days", "Forecast_Delay_Days", "Is_Critical_Wrench",
-        "Task_Health_RAG", "Slip_Days", "Baseline_Start_Date", "Forecast_Start_Date", etc.
-
-    IDENTIFIER RULE: All column and table identifiers MUST be double-quoted in SQL
-    (e.g. "Project_Key", "SPI_Overall", "Baseline_Start_Date"). Unquoted identifiers
-    will fail. Example: SELECT "Project_Key", "Project_Name", "Baseline_Start_Date" FROM public.tbl_01_project_summary;
+    Column convention: PascalCase with underscores (e.g. "Forecast_Delay_Days").
     """
 
     # ── 1. SQL synthesis or passthrough ──────────────────────────────────
@@ -2117,120 +2494,120 @@ async def sra_sql_agent(
         # and fall back to a guided message requesting explicit SQL.
 
         q = question.lower()
-        pk_filter = f'WHERE {_q("Project_Key")} = {project_key}' if project_key else ""
-        pk_and    = f'AND {_q("Project_Key")} = {project_key}' if project_key else ""
+        pk_filter = f"WHERE Project_Key = {project_key}" if project_key else ""
+        pk_and    = f"AND Project_Key = {project_key}" if project_key else ""
 
-        # Pattern library — all identifiers double-quoted; tables schema-qualified
+        # Pattern library — extend as question patterns are identified
         if any(kw in q for kw in ("task", "tasks")):
             if "critical" in q:
                 sql_to_run = f"""
-SELECT {_q("Task_Key")}, {_q("Task_Name")}, {_q("Activity_Code")}, {_q("Domain_Code")},
-       {_q("Task_Status")}, {_q("Total_Float_Days")}, {_q("Forecast_Delay_Days")},
-       {_q("Task_Health_RAG")}, {_q("Slip_Days")}
-FROM {_t("tbl_03_project_task")}
+SELECT Task_Key, Task_Name, Activity_Code, Domain_Code,
+       Task_Status, Total_Float_Days, Forecast_Delay_Days,
+       Task_Health_RAG, Slip_Days
+FROM tbl_03_project_task
 {pk_filter}
-{"WHERE" if not pk_filter else "AND"} {_q("Is_Critical_Wrench")} = TRUE
-ORDER BY {_q("Total_Float_Days")} ASC
+{"WHERE" if not pk_filter else "AND"} Is_Critical_Wrench = TRUE
+ORDER BY Total_Float_Days ASC
 LIMIT {SQL_ROW_CAP}
 """.strip()
             elif "delayed" in q or "slipped" in q or "overdue" in q:
                 sql_to_run = f"""
-SELECT {_q("Task_Key")}, {_q("Task_Name")}, {_q("Activity_Code")}, {_q("Domain_Code")},
-       {_q("Task_Status")}, {_q("Forecast_Delay_Days")}, {_q("Slip_Days")},
-       {_q("Total_Float_Days")}, {_q("Task_Risk_Tier")}
-FROM {_t("tbl_03_project_task")}
+SELECT Task_Key, Task_Name, Activity_Code, Domain_Code,
+       Task_Status, Forecast_Delay_Days, Slip_Days,
+       Total_Float_Days, Task_Risk_Tier
+FROM tbl_03_project_task
 {pk_filter}
-{"WHERE" if not pk_filter else "AND"} {_q("Forecast_Delay_Days")} > 0
-ORDER BY {_q("Forecast_Delay_Days")} DESC
+{"WHERE" if not pk_filter else "AND"} Forecast_Delay_Days > 0
+ORDER BY Forecast_Delay_Days DESC
 LIMIT {SQL_ROW_CAP}
 """.strip()
             elif "float" in q:
                 sql_to_run = f"""
-SELECT {_q("Task_Key")}, {_q("Task_Name")}, {_q("Activity_Code")}, {_q("Domain_Code")},
-       {_q("Total_Float_Days")}, {_q("Float_Health_Status")}, {_q("Float_RAG_Label")},
-       {_q("Is_Critical_Wrench")}, {_q("Float_Erosion_Flag")}
-FROM {_t("tbl_03_project_task")}
+SELECT Task_Key, Task_Name, Activity_Code, Domain_Code,
+       Total_Float_Days, Float_Health_Status, Float_RAG_Label,
+       Is_Critical_Wrench, Float_Erosion_Flag
+FROM tbl_03_project_task
 {pk_filter}
-ORDER BY {_q("Total_Float_Days")} ASC
+ORDER BY Total_Float_Days ASC
 LIMIT {SQL_ROW_CAP}
 """.strip()
             elif "look" in q and ("2" in q or "week" in q):
                 sql_to_run = f"""
-SELECT {_q("Task_Key")}, {_q("Task_Name")}, {_q("Activity_Code")}, {_q("Domain_Code")},
-       {_q("Forecast_Start_Date")}, {_q("Forecast_Finish_Date")},
-       {_q("Is_WorkFront_Available")}, {_q("LookAhead_Priority_Score")}, {_q("Total_Float_Days")}
-FROM {_t("tbl_03_project_task")}
+SELECT Task_Key, Task_Name, Activity_Code, Domain_Code,
+       Forecast_Start_Date, Forecast_Finish_Date,
+       Is_WorkFront_Available, LookAhead_Priority_Score, Total_Float_Days
+FROM tbl_03_project_task
 {pk_filter}
-{"WHERE" if not pk_filter else "AND"} {_q("In_2W_Start_Window")} IS NOT NULL
-ORDER BY {_q("LookAhead_Priority_Score")} DESC
+{"WHERE" if not pk_filter else "AND"} In_2W_Start_Window IS NOT NULL
+ORDER BY LookAhead_Priority_Score DESC
 LIMIT {SQL_ROW_CAP}
 """.strip()
             elif "milestone" in q:
                 sql_to_run = f"""
-SELECT {_q("Task_Key")}, {_q("Task_Name")}, {_q("Activity_Code")}, {_q("Domain_Code")},
-       {_q("Baseline_Finish_Date")}, {_q("Forecast_Finish_Date")},
-       {_q("Milestone_Status_Label")}, {_q("Slip_Days")}
-FROM {_t("tbl_03_project_task")}
+SELECT Task_Key, Task_Name, Activity_Code, Domain_Code,
+       Baseline_Finish_Date, Forecast_Finish_Date,
+       Milestone_Status_Label, Slip_Days
+FROM tbl_03_project_task
 {pk_filter}
-{"WHERE" if not pk_filter else "AND"} {_q("Is_Milestone")} = TRUE
-ORDER BY {_q("Forecast_Finish_Date")} ASC
+{"WHERE" if not pk_filter else "AND"} Is_Milestone = TRUE
+ORDER BY Forecast_Finish_Date ASC
 LIMIT {SQL_ROW_CAP}
 """.strip()
             else:
                 sql_to_run = f"""
-SELECT {_q("Task_Key")}, {_q("Task_Name")}, {_q("Activity_Code")}, {_q("Domain_Code")},
-       {_q("Task_Status")}, {_q("Planned_Progress_Pct")}, {_q("Actual_Progress_Pct")},
-       {_q("Forecast_Delay_Days")}, {_q("Total_Float_Days")}, {_q("Task_Health_RAG")}
-FROM {_t("tbl_03_project_task")}
+SELECT Task_Key, Task_Name, Activity_Code, Domain_Code,
+       Task_Status, Planned_Progress_Pct, Actual_Progress_Pct,
+       Forecast_Delay_Days, Total_Float_Days, Task_Health_RAG
+FROM tbl_03_project_task
 {pk_filter}
-ORDER BY {_q("Forecast_Delay_Days")} DESC NULLS LAST
+ORDER BY Forecast_Delay_Days DESC NULLS LAST
 LIMIT {SQL_ROW_CAP}
 """.strip()
 
         elif any(kw in q for kw in ("activity", "activities")):
             if "delayed" in q or "slipped" in q:
                 sql_to_run = f"""
-SELECT {_q("Activity_Code")}, {_q("Activity_Description")}, {_q("Domain_Code")},
-       {_q("Activity_Status")}, {_q("Forecast_Delay_Days")}, {_q("Slip_Days")},
-       {_q("SPI_RAG_Label")}, {_q("Delay_Magnitude_Label")}, {_q("Is_Critical_Wrench")}
-FROM {_t("tbl_02_project_activity")}
+SELECT Activity_Code, Activity_Description, Domain_Code,
+       Activity_Status, Forecast_Delay_Days, Slip_Days,
+       SPI_RAG_Label, Delay_Magnitude_Label, Is_Critical_Wrench
+FROM tbl_02_project_activity
 {pk_filter}
-{"WHERE" if not pk_filter else "AND"} {_q("Forecast_Delay_Days")} > 0
-ORDER BY {_q("Forecast_Delay_Days")} DESC
+{"WHERE" if not pk_filter else "AND"} Forecast_Delay_Days > 0
+ORDER BY Forecast_Delay_Days DESC
 LIMIT {SQL_ROW_CAP}
 """.strip()
             elif "workfront" in q:
                 sql_to_run = f"""
-SELECT {_q("Activity_Code")}, {_q("Activity_Description")}, {_q("Domain_Code")},
-       {_q("Workfront_Ready_Pct")}, {_q("Workfront_Gap_Count")}, {_q("CAD_Breach_Flag")},
-       {_q("Is_Critical_Wrench")}, {_q("Activity_Status")}
-FROM {_t("tbl_02_project_activity")}
+SELECT Activity_Code, Activity_Description, Domain_Code,
+       Workfront_Ready_Pct, Workfront_Gap_Count, CAD_Breach_Flag,
+       Is_Critical_Wrench, Activity_Status
+FROM tbl_02_project_activity
 {pk_filter}
-{"WHERE" if not pk_filter else "AND"} {_q("Workfront_Ready_Pct")} < 70
-ORDER BY {_q("Workfront_Ready_Pct")} ASC
+{"WHERE" if not pk_filter else "AND"} Workfront_Ready_Pct < 70
+ORDER BY Workfront_Ready_Pct ASC
 LIMIT {SQL_ROW_CAP}
 """.strip()
             else:
                 sql_to_run = f"""
-SELECT {_q("Activity_Code")}, {_q("Activity_Description")}, {_q("Domain_Code")},
-       {_q("Activity_Status")}, {_q("Planned_Progress_Pct")}, {_q("Actual_Progress_Pct")},
-       {_q("Forecast_Delay_Days")}, {_q("Total_Float_Days")}, {_q("Activity_Health_RAG")}
-FROM {_t("tbl_02_project_activity")}
+SELECT Activity_Code, Activity_Description, Domain_Code,
+       Activity_Status, Planned_Progress_Pct, Actual_Progress_Pct,
+       Forecast_Delay_Days, Total_Float_Days, Activity_Health_RAG
+FROM tbl_02_project_activity
 {pk_filter}
-ORDER BY {_q("Forecast_Delay_Days")} DESC NULLS LAST
+ORDER BY Forecast_Delay_Days DESC NULLS LAST
 LIMIT {SQL_ROW_CAP}
 """.strip()
 
         elif any(kw in q for kw in ("project", "projects", "summary", "portfolio")):
             sql_to_run = f"""
-SELECT {_q("Project_Key")}, {_q("Project_Name")}, {_q("Project_Location")},
-       {_q("SPI_Overall")}, {_q("Project_Execution_Index")},
-       {_q("Max_Forecast_Delay_Days_Overall")}, {_q("EOT_Exposure_Days")},
-       {_q("Schedule_Health_RAG")}, {_q("Schedule_Health_Score")},
-       {_q("Data_Freshness_Label")}
-FROM {_t("tbl_01_project_summary")}
+SELECT Project_Key, Project_Name, Project_Location,
+       SPI_Overall, Project_Execution_Index,
+       Max_Forecast_Delay_Days_Overall, EOT_Exposure_Days,
+       Schedule_Health_RAG, Schedule_Health_Score,
+       Data_Freshness_Label
+FROM tbl_01_project_summary
 {pk_filter}
-ORDER BY {_q("Max_Forecast_Delay_Days_Overall")} DESC NULLS LAST
+ORDER BY Max_Forecast_Delay_Days_Overall DESC NULLS LAST
 LIMIT {SQL_ROW_CAP}
 """.strip()
 
@@ -2244,15 +2621,13 @@ LIMIT {SQL_ROW_CAP}
                 "To proceed, please provide one of the following:\n\n"
                 "1. **A more specific question** — include the grain (task/activity/project), "
                 "domain (ENG/PRC/CON), and the specific metrics or conditions you need.\n"
-                "2. **A raw SQL SELECT** — pass it via the `raw_sql` parameter. Use **only** column names "
-                "listed below; **do not invent or guess field names**. Use **double-quoted** identifiers "
-                "and **schema-qualified** tables.\n\n"
-                "### Available Tables (use ONLY these columns — never hallucinate fields)\n\n"
-                "| Table | Grain | Allowed columns (double-quoted) |\n"
-                "|-------|-------|----------------------------------|\n"
-                "| `public.tbl_01_project_summary` | One row per project | \"Project_Key\", \"Project_Name\", \"Project_Location\", \"Baseline_Start_Date\", \"Baseline_Finish_Date\", \"Actual_Start_Date\", \"Forecast_Start_Date\", \"Forecast_Finish_Date\", \"SPI_Overall\", \"Schedule_Health_RAG\", \"Project_Execution_Index\". **NOT on this table:** Domain, Start_Date, End_Date, Status. |\n"
-                "| `public.tbl_02_project_activity` | One row per activity | \"Project_Key\", \"Activity_Code\", \"Domain\", \"Domain_Code\", \"Activity_Status\", \"Forecast_Delay_Days\", \"Total_Float_Days\", \"Baseline_Start_Date\", \"Forecast_Finish_Date\" |\n"
-                "| `public.tbl_03_project_task` | One row per task | \"Project_Key\", \"Task_Key\", \"Task_Name\", \"Activity_Code\", \"Domain_Code\", \"Task_Status\", \"Total_Float_Days\", \"Is_Critical_Wrench\", \"Task_Health_RAG\" |\n\n"
+                "2. **A raw SQL SELECT** — pass it via the `raw_sql` parameter.\n\n"
+                "### Available Tables\n\n"
+                "| Table | Grain | Key Columns |\n"
+                "|-------|-------|-------------|\n"
+                "| `tbl_01_project_summary` | One row per project | Project_Key, SPI_Overall, PEI, EOT_Exposure_Days, Schedule_Health_RAG |\n"
+                "| `tbl_02_project_activity` | One row per activity | Activity_Code, Domain_Code, Forecast_Delay_Days, Float_Days, LAC_Pct |\n"
+                "| `tbl_03_project_task` | One row per task | Task_Key, Activity_Code, Float_Days, Is_Critical_Wrench, Task_Health_RAG |\n\n"
                 "💡 *Example: \"Show all Construction tasks in project 101 with negative float\" "
                 "or \"List activities with CON_LAC_Week_Pct below 60% for project 101\"*"
             )
@@ -2295,10 +2670,8 @@ LIMIT {SQL_ROW_CAP}
             f"The database reported a syntax or access error:\n\n"
             f"> {str(e)}\n\n"
             f"**Query attempted:**\n```sql\n{sql_to_run}\n```\n\n"
-            "Use **double-quoted** identifiers and schema-qualified tables. "
-            "**Do not hallucinate fields:** use ONLY columns that exist (e.g. tbl_01_project_summary "
-            "has NO Domain, Start_Date, End_Date, or Status; use Project_Key, Project_Name, "
-            "Baseline_Start_Date, Baseline_Finish_Date, SPI_Overall, Schedule_Health_RAG, etc.)."
+            "Please review the column names and table references. "
+            "Column names follow the `PascalCase_With_Underscores` convention."
         )
     except asyncio.TimeoutError:
         return (
@@ -2362,5 +2735,6 @@ SRA_TOOLS = [
     # ── Layer 6 — Schedule Communication & Governance ────────────────────
     sra_accountability_trace, # Report flags, delay attribution, as-built variance
     sra_explain_formula,      # SPI / PEI / LAC / Float / EOT formula library
+    # ── Layer 0 — SQL Fallback (Universal Escape Hatch) ──────────────────
+    sra_sql_agent,            # Ad-hoc SQL for any question outside structured tools
 ]
-
